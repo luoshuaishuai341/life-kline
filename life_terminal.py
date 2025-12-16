@@ -38,22 +38,30 @@ st.markdown("""
 
 @st.cache_data
 def load_admin_data():
-    """读取 pcas-code.json 文件 (增强版路径)"""
-    # 获取当前脚本所在的绝对路径
+    """读取 pcas-code.json 文件 (增强版路径识别)"""
+    # 1. 尝试直接读取 (本地开发常见)
+    file_path = "pcas-code.json"
+    if os.path.exists(file_path):
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            pass
+
+    # 2. 尝试使用当前文件的绝对路径拼接 (云端部署常见)
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    # 拼接出 json 文件的绝对路径
-    file_path = os.path.join(current_dir, "pcas-code.json")
-    
-    if not os.path.exists(file_path):
-        # 调试信息：如果找不到，打印一下它到底在找哪里
-        print(f"Error: File not found at {file_path}")
-        return None
-    try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        print(f"Error loading JSON: {e}")
-        return None
+    file_path_abs = os.path.join(current_dir, "pcas-code.json")
+    if os.path.exists(file_path_abs):
+        try:
+            with open(file_path_abs, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            pass
+            
+    return None
+
+# !!! 关键点：这里必须初始化全局变量，否则 main 函数会报错 !!!
+ADMIN_DATA = load_admin_data()
 
 # ==========================================
 # 3. 核心计算引擎 (含精确地理编码)
@@ -64,7 +72,7 @@ def get_precise_location(full_address_str):
     """
     调用 OpenStreetMap API 获取真实、精确的经纬度。
     """
-    geolocator = Nominatim(user_agent="life_kline_v8_pro")
+    geolocator = Nominatim(user_agent="life_kline_v9_fix")
     try:
         # 加上 China 提高国内地址识别率
         search_query = f"China {full_address_str}"
@@ -188,10 +196,11 @@ def main():
         # --- 核心升级：4级联动地址选择 ---
         st.markdown("#### 📍 出生地 (4级联动定位)")
         
+        # 检查数据是否加载成功
         if ADMIN_DATA is None:
-            st.error("⚠️ 未检测到 pcas-code.json 数据文件！")
-            st.info("请从 GitHub 下载该文件并放入项目根目录。")
-            # 降级方案
+            st.error("⚠️ 未读取到 pcas-code.json")
+            st.info("请确保该文件已上传到 GitHub 仓库根目录，并点击了 commit。")
+            # 降级方案，防止报错
             full_query_address = "Beijing"
             final_lat, final_lng = 39.90, 116.40
         else:
@@ -247,7 +256,6 @@ def main():
             sel_detail = st.text_input("详细地点", placeholder="例: 第一人民医院 / 幸福小区5号楼")
             
             # 拼接完整地址
-            # 注意：某些直辖市 省名和市名一样，可以去重
             if sel_prov_name == sel_city_name:
                 full_query_address = f"{sel_prov_name}{sel_area_name}{sel_street_name}{sel_detail}"
             else:
