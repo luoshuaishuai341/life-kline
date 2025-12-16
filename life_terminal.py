@@ -16,7 +16,7 @@ from geopy.exc import GeocoderTimedOut, GeocoderUnavailable
 # 1. 页面配置与全中文炫酷样式
 # ==========================================
 st.set_page_config(
-    page_title="天机 · 全息命理终端 V21 终极版",
+    page_title="天机 · 全息命理终端 V22 终极版",
     page_icon="🌌",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -67,7 +67,7 @@ ADMIN_DATA = load_admin_data()
 # ==========================================
 @st.cache_data(show_spinner=False)
 def get_precise_location(addr):
-    ua = f"bazi_v21_{random.randint(10000,99999)}"
+    ua = f"bazi_v22_{random.randint(10000,99999)}"
     try:
         query = addr if any(k in addr for k in ["香港","澳门","台湾"]) else f"中国 {addr}"
         loc = Nominatim(user_agent=ua).geocode(query, timeout=10)
@@ -230,7 +230,7 @@ class DestinyEngine:
         return f"性别:{self.gender}，出生:{self.birth_date} {self.hour}:{self.minute:02}，八字:{bazi_str}，日干河图数:{self.day_gan_num}，喜用神:{self.favored}，格局:{self.pattern[0]}，神煞:{shensha_names}"
 
 # ==========================================
-# 5. 主程序（出生年下拉框 + 流年滑块从1990开始）
+# 5. 主程序（出生年倒序 + 流年日运文字中文）
 # ==========================================
 def main():
     with st.sidebar:
@@ -248,8 +248,9 @@ def main():
         st.markdown("#### 📅 出生时间")
         col_y, col_m, col_d = st.columns(3)
         current_year = datetime.now().year
-        # 出生年下拉框：从1900开始，默认当前年
-        year = col_y.selectbox("年", range(1900, current_year + 1), index=current_year - 1900)
+        # 出生年倒序：从当前年（2025）开始到1900
+        years_desc = list(range(current_year, 1899, -1))
+        year = col_y.selectbox("年", years_desc, index=0)  # 默认当前年（第一个）
         month = col_m.selectbox("月", range(1,13), format_func=lambda x: f"{x}月")
         day_max = (date(year, month+1, 1) - timedelta(days=1)).day if month < 12 else 31
         day = col_d.selectbox("日", range(1, day_max+1), format_func=lambda x: f"{x}日")
@@ -274,13 +275,11 @@ def main():
                 city = st.selectbox("地级市", city_names)
                 city_d = next(c for c in cities if c['name']==city) if cities else prov_d
             
-            # 精确到县/区
             counties = city_d.get('children', [])
             county_names = [c['name'] for c in counties] if counties else ["市辖区"]
             county = st.selectbox("区/县", county_names)
             county_d = next(c for c in counties if c['name']==county) if counties else city_d
             
-            # 精确到镇/乡/街道
             towns = county_d.get('children', [])
             town_names = [t['name'] for t in towns] if towns else ["无镇/乡"]
             town = st.selectbox("镇/乡/街道", town_names)
@@ -339,11 +338,12 @@ def main():
     with tab2:
         st.markdown("### 📅 流年每日运势")
         # 流年查询滑块从1990开始
-        q_year = st.slider("选择年份", min_value=1990, max_value=datetime.now().year + 20, value=datetime.now().year, step=1)
+        q_year = st.slider("选择查询年份", min_value=1990, max_value=datetime.now().year + 20, value=datetime.now().year, step=1)
         df_daily = engine.generate_daily_kline(q_year)
         fig_d = go.Figure(go.Candlestick(x=df_daily['日期'], open=df_daily['开盘'], high=df_daily['最高'],
                                          low=df_daily['最低'], close=df_daily['收盘'],
-                                         increasing_line_color='#ff1744', decreasing_line_color='#00e676'))
+                                         increasing_line_color='#ff1744', decreasing_line_color='#00e676',
+                                         name='每日运势'))
         fig_d.update_layout(height=500, template="plotly_white", title=f"{q_year}年 · 每日运势波动")
         st.plotly_chart(fig_d, use_container_width=True)
 
