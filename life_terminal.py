@@ -16,7 +16,7 @@ from geopy.exc import GeocoderTimedOut, GeocoderUnavailable
 # 1. 页面配置与全中文炫酷样式
 # ==========================================
 st.set_page_config(
-    page_title="天机 · 全息命理终端 V20 终极版",
+    page_title="天机 · 全息命理终端 V21 终极版",
     page_icon="🌌",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -45,7 +45,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 数据加载（支持三级到县）
+# 2. 数据加载
 # ==========================================
 @st.cache_data
 def load_admin_data():
@@ -67,7 +67,7 @@ ADMIN_DATA = load_admin_data()
 # ==========================================
 @st.cache_data(show_spinner=False)
 def get_precise_location(addr):
-    ua = f"bazi_v20_{random.randint(10000,99999)}"
+    ua = f"bazi_v21_{random.randint(10000,99999)}"
     try:
         query = addr if any(k in addr for k in ["香港","澳门","台湾"]) else f"中国 {addr}"
         loc = Nominatim(user_agent=ua).geocode(query, timeout=10)
@@ -97,7 +97,7 @@ def call_ai_analysis(api_key, base_url, context):
         return f"⚠️ 网络异常: {str(e)}"
 
 # ==========================================
-# 4. 核心引擎（兼容 + 河图洛书）
+# 4. 核心引擎（保持不变）
 # ==========================================
 class DestinyEngine:
     def __init__(self, b_date: date, hour: int, minute: int, lat: float, lng: float, gender: str):
@@ -230,7 +230,7 @@ class DestinyEngine:
         return f"性别:{self.gender}，出生:{self.birth_date} {self.hour}:{self.minute:02}，八字:{bazi_str}，日干河图数:{self.day_gan_num}，喜用神:{self.favored}，格局:{self.pattern[0]}，神煞:{shensha_names}"
 
 # ==========================================
-# 5. 主程序（地址精确到县 + 年份从1990开始）
+# 5. 主程序（出生年下拉框 + 流年滑块从1990开始）
 # ==========================================
 def main():
     with st.sidebar:
@@ -248,7 +248,8 @@ def main():
         st.markdown("#### 📅 出生时间")
         col_y, col_m, col_d = st.columns(3)
         current_year = datetime.now().year
-        year = col_y.selectbox("年", range(1990, current_year + 1), index=current_year - 1990)  # 默认1990年开始，当前年高亮
+        # 出生年下拉框：从1900开始（保留历史支持），默认当前年
+        year = col_y.selectbox("年", range(1900, current_year + 1), index=current_year - 1900)
         month = col_m.selectbox("月", range(1,13), format_func=lambda x: f"{x}月")
         day_max = (date(year, month+1, 1) - timedelta(days=1)).day if month < 12 else 31
         day = col_d.selectbox("日", range(1, day_max+1), format_func=lambda x: f"{x}日")
@@ -273,7 +274,6 @@ def main():
                 city = st.selectbox("地级市", city_names)
                 city_d = next(c for c in cities if c['name']==city) if cities else prov_d
             
-            # 精确到县/区
             counties = city_d.get('children', [])
             county_names = [c['name'] for c in counties] if counties else ["市辖区"]
             county = st.selectbox("区/县", county_names)
@@ -302,7 +302,7 @@ def main():
     col1.markdown(f"<div class='metric-box'><div class='metric-title'>八字</div><div class='metric-value'>{bazi_str}</div></div>", unsafe_allow_html=True)
     col2.markdown(f"<div class='metric-box'><div class='metric-title'>格局</div><div class='metric-value'>{engine.pattern[0]}</div></div>", unsafe_allow_html=True)
     col3.markdown(f"<div class='metric-box'><div class='metric-title'>喜用神</div><div class='metric-value'>{engine.favored}</div></div>", unsafe_allow_html=True)
-    col4.markdown(f"<div class='metric-box'><div class='metric-title'>虚岁</div><div class='metric-value'>{datetime.now().year - year + 1}</div></div>", unsafe_allow_html=True)
+    col4.markdown(f"<div class='metric-box'><div class='metric-title'>虚岁</div><div class='metric-value'>{current_year - year + 1}</div></div>", unsafe_allow_html=True)
     col5.markdown(f"<div class='metric-box'><div class='metric-title'>真太阳时差</div><div class='metric-value'>{engine.true_solar_diff:+.1f}分</div></div>", unsafe_allow_html=True)
 
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["📈 百年人生K线", "📅 流年日运", "🌟 神煞星耀", "🔥 运势热力图", "🔮 AI 大师解盘"])
@@ -331,7 +331,8 @@ def main():
 
     with tab2:
         st.markdown("### 📅 流年每日运势")
-        q_year = st.slider("选择年份", 1990, current_year + 10, current_year)
+        # 流年查询滑块从1990年开始
+        q_year = st.slider("选择年份", min_value=1990, max_value=current_year + 20, value=current_year, step=1)
         df_daily = engine.generate_daily_kline(q_year)
         fig_d = go.Figure(go.Candlestick(x=df_daily['日期'], open=df_daily['开盘'], high=df_daily['最高'],
                                          low=df_daily['最低'], close=df_daily['收盘'],
