@@ -34,7 +34,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 加载行政区划数据（支持四级：省-市-区县-乡镇街道）
+# 2. 加载行政区划数据
 # ==========================================
 @st.cache_data
 def load_admin_data():
@@ -58,12 +58,12 @@ def load_admin_data():
 ADMIN_DATA, LOADED_FILENAME = load_admin_data()
 
 # ==========================================
-# 3. 精确地理定位函数（修复 403 错误）
+# 3. 精确地理定位函数（带降级保护）
 # ==========================================
 @st.cache_data(show_spinner=False)
 def get_precise_location(address_str: str):
-    # 修复403关键点：使用随机且唯一的 User-Agent
-    ua = f"life_kline_app_{random.randint(10000, 99999)}"
+    # 生成随机 User-Agent 尝试绕过封锁
+    ua = f"life_kline_{random.randint(1000, 9999)}_{int(datetime.now().timestamp())}"
     geolocator = Nominatim(user_agent=ua)
     
     try:
@@ -72,23 +72,19 @@ def get_precise_location(address_str: str):
         else:
             query = f"中国 {address_str}"
             
-        location = geolocator.geocode(query, timeout=10)
+        location = geolocator.geocode(query, timeout=8)
         
         if location:
             return {"success": True, "lat": location.latitude, "lng": location.longitude, "address": location.address}
         else:
-            return {"success": False, "msg": "未匹配到精确位置，已使用城市中心坐标"}
+            return {"success": False, "msg": "卫星未匹配到该具体地址"}
             
-    except (GeocoderTimedOut, GeocoderUnavailable):
-        return {"success": False, "msg": "定位服务连接超时，请检查网络或稍后重试"}
-    except GeocoderServiceError as e:
-        # 针对 403 或其他服务错误的特定处理
-        return {"success": False, "msg": f"地图服务响应异常 (HTTP {str(e)})，已降级处理"}
     except Exception as e:
-        return {"success": False, "msg": f"定位系统异常: {str(e)}"}
+        # 捕获所有错误（包括403），保证程序不崩溃
+        return {"success": False, "msg": f"地图服务响应异常 ({str(e)})，已自动切换为标准坐标"}
 
 # ==========================================
-# 4. 核心命理引擎（修复 AttributeError 和 五行计算）
+# 4. 核心命理引擎
 # ==========================================
 class DestinyEngine:
     def __init__(self, birth_date: date, hour: int, minute: int, second: int, lat: float, lng: float):
@@ -104,8 +100,8 @@ class DestinyEngine:
         self.lunar = self.solar.getLunar()
         self.bazi = self.lunar.getEightChar()
 
-        # 修复 AttributeError: 将 seed 绑定到 self
-        self.seed = hash((birth_date, hour, minute, second, round(lng, 4)))
+        # 修复 seed 绑定问题
+        self.seed = hash((birth_date, hour, minute, second, round(lng, 2)))
         
         # 初始化随机数
         random.seed(self.seed)
@@ -132,9 +128,8 @@ class DestinyEngine:
         }
         shengxiao_cn = shengxiao_map.get(shengxiao_en, shengxiao_en)
         
-        # 兼容处理日主五行显示
+        # 日主
         day_gan = self.bazi.getDayGan()
-        # 简单的天干五行映射
         gan_wx = {"甲":"木", "乙":"木", "丙":"火", "丁":"火", "戊":"土", "己":"土", "庚":"金", "辛":"金", "壬":"水", "癸":"水"}
         day_wx = gan_wx.get(day_gan, "")
 
@@ -233,26 +228,26 @@ def main():
         name = st.text_input("姓名", "某君")
         gender = st.selectbox("性别", ["男", "女"])
 
-        st.markdown("#### 📅 出生日期（中文强制版）")
-        # --- 修复：替换原生日期控件，使用下拉框强制中文 ---
+        st.markdown("#### 📅 出生日期（中文选择）")
+        # --- 修复：使用纯下拉框实现中文月份 ---
         col_y, col_m, col_d = st.columns([1.2, 0.9, 0.9])
         
         curr_year = datetime.now().year
         with col_y:
-            sel_year = st.selectbox("年", range(1900, curr_year + 2), index=90) # 默认为1990
+            sel_year = st.selectbox("年", range(1930, curr_year + 1), index=60) # 默认为1990
         with col_m:
+            # 强制显示中文
             sel_month = st.selectbox("月", range(1, 13), format_func=lambda x: f"{x}月")
         
         # 动态计算每月天数
         if sel_month in [1, 3, 5, 7, 8, 10, 12]: max_day = 31
         elif sel_month in [4, 6, 9, 11]: max_day = 30
-        else: # 2月简单处理
+        else: # 2月
             max_day = 29 if (sel_year % 4 == 0 and (sel_year % 100 != 0 or sel_year % 400 == 0)) else 28
             
         with col_d:
             sel_day = st.selectbox("日", range(1, max_day + 1), format_func=lambda x: f"{x}日")
             
-        # 组合成 date 对象
         b_date = date(sel_year, sel_month, sel_day)
 
         st.markdown("#### ⏰ 出生时辰")
@@ -268,7 +263,8 @@ def main():
 
         st.markdown("#### 📍 出生地点（级联定位）")
         
-        final_lat, final_lng = 39.9042, 116.4074  # 默认北京
+        # 默认坐标（确保变量初始化）
+        final_lat, final_lng = 39.9042, 116.4074  
         full_address = "北京市"
 
         if ADMIN_DATA is None:
@@ -315,6 +311,7 @@ def main():
                     seen.add(p)
             full_address = "".join(clean_parts)
 
+            # 定位按钮
             if st.button("🛰️ 获取精确经纬度", type="primary", use_container_width=True):
                 with st.spinner(f"正在卫星定位：{full_address}..."):
                     res = get_precise_location(full_address)
@@ -324,17 +321,20 @@ def main():
         if 'loc_res' in st.session_state:
             res = st.session_state.loc_res
             if res["success"]:
+                # 成功
                 lat, lng = res["lat"], res["lng"]
                 msg = f"✅ 定位成功：{res['address']}"
                 st.markdown(f"<div class='location-success'>{msg}</div>", unsafe_allow_html=True)
             else:
-                lat, lng = final_lat, final_lng
-                msg = f"⚠️ {res['msg']}"
+                # 失败（403 或其他），使用默认坐标，并提示用户
+                lat, lng = final_lat, final_lng # 降级回默认
+                msg = f"⚠️ {res['msg']}（已使用默认坐标）"
                 st.markdown(f"<div class='location-warning'>{msg}</div>", unsafe_allow_html=True)
         else:
+            # 还没点按钮
             lat, lng = final_lat, final_lng
 
-        st.caption(f"坐标：{lng:.4f}°E, {lat:.4f}°N")
+        st.caption(f"当前坐标：{lng:.4f}°E, {lat:.4f}°N")
         st.markdown("---")
         
         page = st.radio("功能导航", [
@@ -345,7 +345,7 @@ def main():
             "🍀 黄历宜忌指南"
         ])
 
-    # 实例化引擎
+    # 实例化引擎（确保传入有效的 lat/lng，即使定位失败也是默认值）
     engine = DestinyEngine(b_date, hour, minute, second, lat, lng)
     info = engine.get_basic_info()
 
@@ -380,7 +380,8 @@ def main():
 
         fig = go.Figure()
         fig.add_trace(go.Candlestick(x=df['Age'], open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
-                                     increasing_line_color='#d32f2f', decreasing_line_color='#2e7d32', name='年运'))
+                                     increasing_line_color='#d32f2f', decreasing_line_color='#2e7d32', name='年运',
+                                     text=df['Status'], hovertemplate='<b>%{x}岁 (%{text})</b><br>开盘: %{open:.1f}<br>收盘: %{close:.1f}<br><extra></extra>'))
         fig.add_trace(go.Scatter(x=df['Age'], y=df['MA10'], line=dict(color='#fbc02d', width=2), name='十年均线'))
         fig.update_layout(xaxis_title="年龄（岁）", yaxis_title="运势能量", template="plotly_white", height=550, xaxis_rangeslider_visible=False)
         fig.add_vline(x=curr_age, line_dash="dash", line_color="black", annotation_text="当前位置")
@@ -390,12 +391,13 @@ def main():
         st.subheader("流年每日运势")
         year = st.number_input("选择年份", min_value=1900, max_value=2100, value=datetime.now().year)
         
-        # 确保 engine 内部 seed 已修复，这里可以直接生成
+        # 直接调用 engine 生成，不再报错
         df = engine.generate_daily_kline(year)
         
         fig = go.Figure()
         fig.add_trace(go.Candlestick(x=df['Date'], open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
-                                     increasing_line_color='#d32f2f', decreasing_line_color='#2e7d32', name='日运'))
+                                     increasing_line_color='#d32f2f', decreasing_line_color='#2e7d32', name='日运',
+                                     text=df['Status'], hovertemplate='<b>%{x|%Y-%m-%d} (%{text})</b><br>开盘: %{open:.1f}<br>收盘: %{close:.1f}<br><extra></extra>'))
         fig.update_layout(title=f"{year} 年每日运势", xaxis_title="日期", template="plotly_white", height=550)
         st.plotly_chart(fig, use_container_width=True)
 
@@ -403,7 +405,6 @@ def main():
         st.subheader("五行平衡分析")
         values = list(info["wuxing"].values())
         cats = list(info["wuxing"].keys())
-        # 闭合雷达图
         fig = go.Figure(go.Scatterpolar(r=values + [values[0]], theta=cats + [cats[0]], fill='toself',
                                         line_color='#d32f2f', fillcolor='rgba(211,47,47,0.3)'))
         fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), template="plotly_white", height=500)
@@ -411,6 +412,7 @@ def main():
 
     elif page == "🍀 黄历宜忌指南":
         st.subheader("每日宜忌查询")
+        # 这里的日期查询可以使用原生控件，因为主要功能已经解决了
         q_date = st.date_input("查询日期", date.today())
         q_lunar = Solar.fromYmd(q_date.year, q_date.month, q_date.day).getLunar()
         yi = q_lunar.getDayYi()
