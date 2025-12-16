@@ -38,17 +38,22 @@ st.markdown("""
 
 @st.cache_data
 def load_admin_data():
-    """读取 pcas-code.json 文件"""
-    file_path = "pcas-code.json"
+    """读取 pcas-code.json 文件 (增强版路径)"""
+    # 获取当前脚本所在的绝对路径
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    # 拼接出 json 文件的绝对路径
+    file_path = os.path.join(current_dir, "pcas-code.json")
+    
     if not os.path.exists(file_path):
+        # 调试信息：如果找不到，打印一下它到底在找哪里
+        print(f"Error: File not found at {file_path}")
         return None
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             return json.load(f)
-    except:
+    except Exception as e:
+        print(f"Error loading JSON: {e}")
         return None
-
-ADMIN_DATA = load_admin_data()
 
 # ==========================================
 # 3. 核心计算引擎 (含精确地理编码)
