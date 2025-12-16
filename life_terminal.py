@@ -3,66 +3,77 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from lunar_python import Solar
-from datetime import datetime, time
+from lunar_python import Solar, Lunar, LunarYear
+from datetime import datetime, time, timedelta
 import random
+from geopy.geocoders import Nominatim # 新增：用于地址转经纬度
 
 # ==========================================
-# 1. 界面配置与 CSS 注入 (金融终端风格)
+# 1. 界面配置与 CSS (极简白主题)
 # ==========================================
 
 st.set_page_config(
-    page_title="LIFE ASSET TERMINAL | 人生资产终端",
-    page_icon="🧬",
+    page_title="人生K线 | 运势管理系统",
+    page_icon="🏮",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# 注入 CSS：强制深色模式，模拟彭博终端/Web3交易所风格
+# 注入 CSS：白底黑字，现代简约风格
 st.markdown("""
 <style>
-    /* 全局背景设为纯黑 */
+    /* 全局背景设为纯白 */
     .stApp {
-        background-color: #050505;
-        color: #e0e0e0;
+        background-color: #f8f9fa;
+        color: #333333;
     }
     
-    /* 侧边栏背景 */
+    /* 侧边栏背景 - 浅灰 */
     section[data-testid="stSidebar"] {
-        background-color: #0a0a0a;
-        border-right: 1px solid #333;
+        background-color: #ffffff;
+        border-right: 1px solid #e0e0e0;
     }
     
-    /* 字体统一为编程等宽字体，增加科技感 */
+    /* 字体优化 */
     * {
-        font-family: 'Roboto Mono', 'Courier New', monospace !important;
+        font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif !important;
     }
     
-    /* 标题颜色 - 赛博青 */
+    /* 标题颜色 */
     h1, h2, h3 {
-        color: #00ffca !important;
+        color: #1a1a1a !important;
+        font-weight: 700 !important;
     }
     
-    /* 关键指标数字样式 */
+    /* 关键指标卡片优化 */
     div[data-testid="stMetricValue"] {
-        font-size: 26px;
-        color: #ffffff;
-        text-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
+        font-size: 24px;
+        color: #d32f2f; /* 中国红 */
+        font-weight: bold;
     }
     div[data-testid="stMetricLabel"] {
-        color: #888;
+        color: #666;
         font-size: 14px;
     }
     
-    /* 按钮自定义 */
-    button[kind="secondary"] {
-        border: 1px solid #00ffca;
-        color: #00ffca;
-    }
+    /* 按钮自定义 - 红色系 */
     button[kind="primary"] {
-        background-color: #00ffca;
-        color: #000;
+        background-color: #d32f2f;
+        color: white;
         border: none;
+        border-radius: 4px;
+    }
+    button[kind="secondary"] {
+        border: 1px solid #d32f2f;
+        color: #d32f2f;
+        background-color: white;
+    }
+    
+    /* 输入框优化 */
+    .stTextInput input, .stDateInput input, .stTimeInput input {
+        background-color: #ffffff;
+        color: #333;
+        border: 1px solid #ddd;
     }
     
     /* 去除顶部留白 */
@@ -73,8 +84,23 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 核心量化引擎 (Quant Engine)
+# 2. 核心逻辑工具函数
 # ==========================================
+
+def get_location_longitude(address):
+    """
+    输入地址，返回经度。
+    如果解析失败，默认返回北京经度 (116.4)
+    """
+    try:
+        geolocator = Nominatim(user_agent="life_kline_app_v3")
+        location = geolocator.geocode(address)
+        if location:
+            return location.longitude, f"已定位: {address}"
+        else:
+            return 116.4, "地址未找到，使用默认经度"
+    except:
+        return 116.4, "定位服务连接超时，使用默认经度"
 
 class DestinyQuantEngine:
     """
@@ -84,7 +110,7 @@ class DestinyQuantEngine:
         self.birth_date = birth_date
         self.gender = gender
         
-        # 1. 八字排盘 (利用 lunar_python)
+        # 1. 八字排盘
         self.solar = Solar.fromYmdHms(
             birth_date.year, birth_date.month, birth_date.day,
             birth_time.hour, birth_time.minute, 0
@@ -92,62 +118,63 @@ class DestinyQuantEngine:
         self.lunar = self.solar.getLunar()
         self.ba_zi = self.lunar.getEightChar()
         
-        # 2. 锁定随机种子 (Deterministic Randomness)
-        # 核心逻辑：用生日生成一个种子，确保同一个人每次生成的图表是一样的
+        # 2. 锁定随机种子
         seed_val = int(birth_date.strftime("%Y%m%d")) + birth_time.hour + birth_time.minute
         random.seed(seed_val)
         np.random.seed(seed_val)
 
     def get_profile(self):
-        """获取资产(用户)基础信息"""
+        """获取基础信息"""
         return {
-            "code": f"{self.ba_zi.getDayGan()}{self.ba_zi.getDayZhi()}", # 日柱作为股票代码
-            "full_bazi": f"{self.ba_zi.getYear()} {self.ba_zi.getMonth()} {self.ba_zi.getDay()} {self.ba_zi.getTime()}",
-            "wuxing": self.ba_zi.getDayWuXing(), # 核心五行
+            "code": f"{self.ba_zi.getDayGan()}{self.ba_zi.getDayZhi()}", # 日柱
+            "wuxing": self.ba_zi.getDayWuXing(), # 日主五行
             "animal": self.lunar.getYearShengXiao(),
+            "year_zhu": f"{self.ba_zi.getYearGan()}{self.ba_zi.getYearZhi()}",
+            "month_zhu": f"{self.ba_zi.getMonthGan()}{self.ba_zi.getMonthZhi()}",
+        }
+    
+    def get_daily_fortune(self):
+        """获取今日实时运势 (基于 Lunar 库)"""
+        now = datetime.now()
+        today_solar = Solar.fromYmdHms(now.year, now.month, now.day, now.hour, now.minute, 0)
+        today_lunar = today_solar.getLunar()
+        
+        return {
+            "date_str": f"{now.year}年{now.month}月{now.day}日",
+            "lunar_str": f"农历{today_lunar.getMonthInChinese()}月{today_lunar.getDayInChinese()}",
+            "yi": " ".join(today_lunar.getDayYi()), # 宜
+            "ji": " ".join(today_lunar.getDayJi()), # 忌
+            "chong": f"冲{today_lunar.getDayChongDesc()}", # 冲煞
+            "lucky_god": f"{today_lunar.getPositionXiDesc()}", # 喜神方位
+            "wealth_god": f"{today_lunar.getPositionCaiDesc()}"  # 财神方位
         }
 
     def generate_market_data(self, start_age=0, end_age=100):
-        """
-        生成 0-100 岁的人生市场数据 (OHLCV)
-        *注*：此处逻辑为演示用，通过数学模型模拟人生波动。
-        """
+        """生成人生K线数据"""
         data = []
-        price = 100.0 # 初始发行价
+        price = 100.0
         
-        # 模拟不同阶段的波动率
         for age in range(start_age, end_age + 1):
             year = self.birth_date.year + age
             
-            # --- 模拟算法开始 ---
-            
-            # 1. 基础波动 (Market Noise)
+            # --- 模拟算法 (此处可替换为真实八字喜忌逻辑) ---
+            # 基础波动
             change = np.random.normal(0, 3.0) 
             
-            # 2. 周期性因子 (Cycle - 大运)
-            # 假设每10年换一个大运，这里随机决定这个大运是好是坏
+            # 大运周期 (10年一运)
             cycle_idx = age // 10
-            cycle_trend = np.sin(cycle_idx) * 2.5 
+            cycle_trend = np.sin(cycle_idx) * 2.8 
             change += cycle_trend
             
-            # 3. 特殊年份冲击 (Shock Events)
-            volatility = 1.0
-            if age % 12 == 0: # 本命年
-                volatility = 2.0 
-                change -= 2 # 压力位
-            
-            if age == 18: change += 5 # 普涨
+            # 特殊年份 (本命年、刑冲破害模拟)
+            if age % 12 == 0: 
+                change -= 3 # 本命年压力
             
             # 计算 OHLC
-            close_price = max(10, price + change) # 价格不能低于10
+            close_price = max(10, price + change)
             open_price = price
-            
-            # 震荡区间
-            high_price = max(open_price, close_price) + abs(np.random.normal(0, volatility))
-            low_price = min(open_price, close_price) - abs(np.random.normal(0, volatility))
-            
-            # Volume 模拟精力消耗
-            volume = int(abs(change) * 100 + 500)
+            high_price = max(open_price, close_price) + abs(np.random.normal(0, 1.5))
+            low_price = min(open_price, close_price) - abs(np.random.normal(0, 1.5))
             
             data.append({
                 "Year": year,
@@ -156,208 +183,198 @@ class DestinyQuantEngine:
                 "High": high_price,
                 "Low": low_price,
                 "Close": close_price,
-                "Volume": volume
             })
-            
             price = close_price
-            # --- 模拟算法结束 ---
 
         return pd.DataFrame(data)
 
     @staticmethod
     def calculate_indicators(df):
-        """计算技术指标: MA, MACD, RSI"""
-        # MA10 (十年大运线)
-        df['MA10'] = df['Close'].rolling(window=10).mean()
-        
-        # MACD (动能指标)
-        exp12 = df['Close'].ewm(span=12, adjust=False).mean()
-        exp26 = df['Close'].ewm(span=26, adjust=False).mean()
-        df['MACD'] = exp12 - exp26
-        df['Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
-        df['Hist'] = df['MACD'] - df['Signal']
-        
-        # RSI (相对强弱 - 精力槽)
-        delta = df['Close'].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-        rs = gain / loss
-        df['RSI'] = 100 - (100 / (1 + rs))
-        
+        df['MA10'] = df['Close'].rolling(window=10).mean() # 10年大运
         return df
 
 # ==========================================
-# 3. 前端逻辑与渲染 (Main Application)
+# 3. 前端逻辑
 # ==========================================
 
 def main():
-    # --- 侧边栏：控制面板 ---
+    # --- 侧边栏：信息录入 ---
     with st.sidebar:
-        st.header(">> TERMINAL ACCESS")
+        st.header("📝 缘主信息录入")
         st.markdown("---")
         
-        input_name = st.text_input("USER ID (姓名/代号)", "TRADER_01")
+        input_name = st.text_input("姓名", "某君")
+        input_gender = st.radio("性别", ["男", "女"], horizontal=True)
         
-        c1, c2 = st.columns(2)
-        with c1:
-            input_gender = st.selectbox("GENDER", ["男", "女"])
-        with c2:
-            input_lng = st.number_input("LNG (经度)", 120.2, help="出生地经度，用于真太阳时")
+        # 优化：地址输入转经纬度
+        st.markdown("###### 出生地信息")
+        input_address = st.text_input("出生城市/地址 (自动获取经度)", "北京市东城区")
+        
+        # 经度处理逻辑
+        calc_longitude = 116.4 # 默认
+        if input_address:
+            # 实际调用时，可以加一个按钮避免频繁请求，或者直接计算
+            # 这里为了流畅体验，我们假设用户输完地址后点击生成按钮才计算
+            pass
             
-        input_date = st.date_input("IPO DATE (出生日期)", datetime(2000, 1, 1))
-        # input_time = st.time_input("IPO TIME (出生时间)", datetime(12, 0))
-        input_time = st.time_input("IPO TIME (出生时间)", time(12, 0))
+        input_date = st.date_input("出生日期 (公历)", datetime(1995, 8, 18))
+        input_time = st.time_input("出生时间", time(8, 30))
         
         st.markdown("---")
-        generate_btn = st.button("INITIATE_SEQUENCE (生成图表)", type="primary", use_container_width=True)
+        generate_btn = st.button("✨ 开启人生排盘", type="primary", use_container_width=True)
         
-        st.caption("v2.0.4 | Life Asset Mgt System")
+        st.caption("版本: v3.1 | 仅供娱乐参考")
 
-    # --- 主界面逻辑 ---
+    # --- 主界面 ---
     if generate_btn:
-        # 1. 实例化引擎并计算
-        engine = DestinyQuantEngine(input_date, input_time, input_gender, input_lng)
+        # 1. 获取经纬度
+        with st.spinner('正在定位出生地磁场...'):
+            lng, loc_msg = get_location_longitude(input_address)
+        st.toast(loc_msg, icon="📍")
+
+        # 2. 实例化引擎
+        engine = DestinyQuantEngine(input_date, input_time, input_gender, lng)
         profile = engine.get_profile()
+        daily_fortune = engine.get_daily_fortune()
         df = engine.generate_market_data()
         df = engine.calculate_indicators(df)
         
-        # 2. 获取当前年份状态
+        # 计算当前岁数
         current_year = datetime.now().year
-        # 容错处理
+        current_age = current_year - input_date.year
+        
+        # 获取当年数据
         try:
             curr_row = df[df['Year'] == current_year].iloc[0]
-            # 计算同比变化
-            prev_row = df[df['Year'] == current_year - 1].iloc[0]
-            pct_change = ((curr_row['Close'] - prev_row['Close']) / prev_row['Close']) * 100
+            trend_val = curr_row['Close'] - curr_row['Open']
         except:
             curr_row = df.iloc[-1]
-            pct_change = 0.0
+            trend_val = 0
 
-        # --- 顶部：资产概览 Dashboard ---
-        st.markdown(f"### 🧬 ASSET MONITOR: {input_name.upper()}")
+        # --- 模块1: 个人命盘概览 ---
+        st.markdown(f"## 🏮 命盘分析: {input_name}")
         
-        k1, k2, k3, k4 = st.columns(4)
-        k1.metric("ASSET CODE", profile['code'], f"核心五行: {profile['wuxing']}")
-        k2.metric("VALUATION (运势)", f"{curr_row['Close']:.2f}", f"{pct_change:+.2f}%")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("日主 (元神)", profile['wuxing'], f"日柱: {profile['code']}")
+        c2.metric("当前运势分", f"{curr_row['Close']:.0f}", f"{trend_val:+.1f}", delta_color="normal") # normal会自动红涨绿跌
+        c3.metric("当前岁数", f"{current_age} 岁", "虚岁 +1")
+        c4.metric("生肖", profile['animal'], f"{profile['year_zhu']}年")
         
-        # RSI 颜色逻辑
-        rsi_val = curr_row['RSI']
-        rsi_state = "过热 (Sell)" if rsi_val > 70 else ("超卖 (Buy)" if rsi_val < 30 else "中性 (Hold)")
-        k3.metric("RSI (精力)", f"{rsi_val:.1f}", rsi_state, delta_color="inverse")
-        
-        # MACD 逻辑
-        macd_val = curr_row['Hist']
-        macd_state = "多头增强" if macd_val > 0 else "空头主导"
-        k4.metric("MOMENTUM (动能)", f"{macd_val:.2f}", macd_state)
-        
-        st.markdown("---")
+        st.divider()
 
-        # --- 中部：高级交互式图表 (Subplots) ---
-        # 创建两行子图：上行是K线，下行是MACD
-        fig = make_subplots(
-            rows=2, cols=1, 
-            shared_xaxes=True, 
-            vertical_spacing=0.03, 
-            row_heights=[0.7, 0.3]
-        )
-
-        # Draw 1: K-Line (Candlestick)
-        fig.add_trace(go.Candlestick(
-            x=df['Year'],
-            open=df['Open'], high=df['High'],
-            low=df['Low'], close=df['Close'],
-            name='运势',
-            increasing_line_color='#00ffca', # 赛博绿
-            decreasing_line_color='#ff0055'  # 赛博红
-        ), row=1, col=1)
-
-        # Draw 2: MA10 (Moving Average)
-        fig.add_trace(go.Scatter(
-            x=df['Year'], y=df['MA10'],
-            mode='lines',
-            line=dict(color='#ffd700', width=1.5),
-            name='MA10 (大运线)'
-        ), row=1, col=1)
-
-        # Draw 3: MACD Histogram
-        colors = ['#004d40' if v >= 0 else '#4d0000' for v in df['Hist']] # 深色柱体
-        border_colors = ['#00ffca' if v >= 0 else '#ff0055' for v in df['Hist']] # 亮色边框
+        # --- 模块2: 每日实时运势 (新功能) ---
+        st.markdown("### 📅 今日运势播报")
         
-        fig.add_trace(go.Bar(
-            x=df['Year'], y=df['Hist'],
-            marker_color=colors,
-            marker_line_color=border_colors,
-            marker_line_width=1,
-            name='动能'
-        ), row=2, col=1)
-
-        # 图表布局优化
-        fig.update_layout(
-            template="plotly_dark", # 使用 Plotly 自带深色模板
-            paper_bgcolor='rgba(0,0,0,0)', # 透明背景融入 Streamlit
-            plot_bgcolor='rgba(0,0,0,0)',
-            xaxis_rangeslider_visible=False,
-            height=650,
-            hovermode="x unified",
-            showlegend=False,
-            margin=dict(t=30, b=30, l=30, r=30)
-        )
+        # 使用卡片样式展示今日宜忌
+        day_col1, day_col2 = st.columns([1, 2])
         
-        # 标记 "You Are Here"
-        fig.add_vline(x=current_year, line_width=1, line_dash="dash", line_color="white")
-        
-        st.plotly_chart(fig, use_container_width=True)
-
-        # --- 底部：AI 策略生成器 ---
-        st.markdown("#### 🤖 AI STRATEGY ADVISOR (智能投顾)")
-        
-        # 简单的规则生成器 (Rule-based Generation)
-        advisor_col1, advisor_col2 = st.columns([0.7, 0.3])
-        
-        with advisor_col1:
-            # 根据 MA 位置判断
-            trend = "Bullish (多头排列)" if curr_row['Close'] > curr_row['MA10'] else "Bearish (空头压制)"
-            trend_desc = "当前运势运行于十年大运线之上，处于顺风期。" if curr_row['Close'] > curr_row['MA10'] else "当前运势受阻，处于调整期/蛰伏期。"
-            
+        with day_col1:
             st.info(f"""
-            **技术面扫描**:
-            * **Trend**: {trend} - {trend_desc}
-            * **Signal**: MACD 柱状图为 {macd_val:.2f}，显示动能{'正在衰竭' if abs(macd_val)<1 else '强劲'}。
+            **{daily_fortune['date_str']}** {daily_fortune['lunar_str']}
+            
+            **财神方位**: {daily_fortune['wealth_god']}  
+            **喜神方位**: {daily_fortune['lucky_god']}
             """)
             
-        with advisor_col2:
-            # 给出具体的行动建议
-            if curr_row['Close'] > curr_row['MA10'] and macd_val > 0:
-                action = "STRONG BUY (重仓出击)"
-                tips = "适合创业、跳槽、激进投资。"
-                color = "green"
-            elif curr_row['RSI'] > 80:
-                action = "TAKE PROFIT (获利了结)"
-                tips = "注意身体，避免过劳，见好就收。"
-                color = "orange"
-            elif curr_row['Close'] < curr_row['MA10']:
-                action = "HODL (持币观望)"
-                tips = "学习技能，等待下一个周期。"
-                color = "red"
-            else:
-                action = "NEUTRAL (中性)"
-                tips = "按部就班，平稳过渡。"
-                color = "blue"
-                
-            st.markdown(f"""
-            <div style="border:1px solid #333; padding:15px; border-radius:5px; text-align:center;">
-                <h3 style="margin:0; color:{'#00ffca' if color=='green' else '#ff0055'}">{action}</h3>
-                <p style="margin-top:10px; font-size:14px; color:#ccc;">{tips}</p>
+        with day_col2:
+            yi_ji_html = f"""
+            <div style="display: flex; gap: 20px;">
+                <div style="background-color: #fff3cd; padding: 15px; border-radius: 8px; flex: 1; border-left: 5px solid #ffc107;">
+                    <h4 style="margin:0; color: #856404;">🌞 宜 (Yi)</h4>
+                    <p style="margin-top:5px; color: #856404;">{daily_fortune['yi']}</p>
+                </div>
+                <div style="background-color: #f8d7da; padding: 15px; border-radius: 8px; flex: 1; border-left: 5px solid #dc3545;">
+                    <h4 style="margin:0; color: #721c24;">🚫 忌 (Ji)</h4>
+                    <p style="margin-top:5px; color: #721c24;">{daily_fortune['ji']}</p>
+                </div>
             </div>
-            """, unsafe_allow_html=True)
+            """
+            st.markdown(yi_ji_html, unsafe_allow_html=True)
+            
+        st.divider()
+
+        # --- 模块3: 人生K线图 ---
+        st.markdown("### 📈 人生 K 线推演 (百年大运)")
+        
+        fig = make_subplots(rows=1, cols=1)
+
+        # K线图 (中国红绿: 涨红跌绿)
+        fig.add_trace(go.Candlestick(
+            x=df['Age'], # X轴改为年龄，更直观
+            open=df['Open'], high=df['High'],
+            low=df['Low'], close=df['Close'],
+            name='年运',
+            increasing_line_color='#d32f2f', # 红涨
+            decreasing_line_color='#00796b'  # 绿跌
+        ))
+
+        # 均线
+        fig.add_trace(go.Scatter(
+            x=df['Age'], y=df['MA10'],
+            mode='lines',
+            line=dict(color='#FFD700', width=2),
+            name='十年大运线'
+        ))
+        
+        # 布局优化
+        fig.update_layout(
+            template="simple_white", # 更改为白底模板
+            xaxis_title="年龄 (岁)",
+            yaxis_title="运势指数",
+            xaxis_rangeslider_visible=False,
+            height=500,
+            hovermode="x unified",
+            margin=dict(t=20, b=20, l=40, r=40)
+        )
+        
+        # 标记当前年龄
+        fig.add_vline(x=current_age, line_width=1, line_dash="dash", line_color="#333")
+        fig.add_annotation(x=current_age, y=curr_row['High'], text="当前位置", showarrow=True, arrowhead=1)
+
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # 在图表下方显示当前输入的岁数
+        st.caption(f"📍 当前推演对象年龄: **{current_age} 岁** (出生于 {input_date.year} 年)")
+        
+        st.divider()
+
+        # --- 模块4: 详细运势解读 ---
+        st.markdown("### 📜 命理师批注")
+        
+        # 逻辑判断生成中文文案
+        trend_status = "大吉" if curr_row['Close'] > curr_row['MA10'] else "平稳"
+        if curr_row['Close'] < curr_row['MA10'] and curr_row['Close'] < curr_row['Open']:
+            trend_status = "需谨慎"
+            
+        advice_text = ""
+        if trend_status == "大吉":
+            advice_text = "当前运势强于大运基准，且处于上升通道。适合大胆进取，投资、创业或求职皆有良机。红鸾星动，人际关系顺畅。"
+        elif trend_status == "需谨慎":
+            advice_text = "运势出现回调，且低于十年平均线。建议韬光养晦，保守理财，注意身体健康，避免口舌之争。"
+        else:
+            advice_text = "运势平稳，无大起大落。适合积累沉淀，学习新技能，为下一轮爆发做准备。"
+
+        st.markdown(f"""
+        <div style="background-color: #f0f2f6; padding: 20px; border-radius: 10px;">
+            <p><strong>【总体评价】</strong>：<span style="color: #d32f2f; font-weight: bold;">{trend_status}</span></p>
+            <p><strong>【大师建议】</strong>：{advice_text}</p>
+            <p style="font-size: 0.9em; color: #666; margin-top: 10px;">*注：人生运势起伏乃常态，K线仅供参考，命运掌握在自己手中。</p>
+        </div>
+        """, unsafe_allow_html=True)
 
     else:
-        # 初始状态
+        # 初始欢迎页 (白色简约版)
         st.markdown("""
-        <div style='text-align: center; margin-top: 100px; opacity: 0.6;'>
-            <h1>🧬 TERMINAL READY</h1>
-            <p>Waiting for user initialization sequence...</p>
-            <p style='font-size: 12px;'>Please enter data in the left sidebar.</p>
+        <div style='text-align: center; margin-top: 80px; color: #555;'>
+            <h1>🏮 人生 K 线系统</h1>
+            <p style='font-size: 1.1em;'>传统的八字命理 · 现代的可视化呈现</p>
+            <br>
+            <div style='background-color: #ffffff; padding: 20px; border-radius: 10px; border: 1px solid #eee; display: inline-block; text-align: left;'>
+                <p>👉 <strong>输入地址</strong>：自动定位经纬度，排盘更精准</p>
+                <p>👉 <strong>每日运势</strong>：查看今日宜忌、财神方位</p>
+                <p>👉 <strong>百年推演</strong>：红涨绿跌，一目了然</p>
+            </div>
+            <p style='margin-top: 30px; font-size: 12px; color: #999;'>请在左侧输入信息开始排盘</p>
         </div>
         """, unsafe_allow_html=True)
 

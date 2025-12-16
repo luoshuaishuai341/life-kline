@@ -3,3 +3,4 @@ plotly
 pandas
 numpy
 lunar_python
+geopy
