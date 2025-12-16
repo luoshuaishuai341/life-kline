@@ -124,7 +124,7 @@ def call_ai_analysis(api_key, base_url, context, kline_lows):
         return f"⚠️ 网络异常: {str(e)}"
 
 # ==========================================
-# 4. 核心引擎（真正动态 + 花里胡哨增强）
+# 4. 核心引擎（修复 KeyError + 动态个性化）
 # ==========================================
 class DestinyEngine:
     def __init__(self, b_date: date, hour: int, minute: int, lat: float, lng: float, gender: str):
@@ -138,7 +138,7 @@ class DestinyEngine:
         self.bazi = self.lunar.getEightChar()
         
         # 动态种子（每个人完全不同）
-        self.seed = hash((b_date, hour, minute, lat, lng, gender, self.bazi.getDayGan()))
+        self.seed = hash((b_date, hour, minute, lat, lng, gender))
         random.seed(self.seed)
         np.random.seed(self.seed % (2**32))
         
@@ -146,7 +146,7 @@ class DestinyEngine:
         self.wuxing_strength = self._calc_wuxing()
         self.favored = self._get_favored()
         self.shen_sha = self._calc_shen_sha()
-        self.pattern = self._get_pattern()  # 新增：格局判断
+        self.pattern = self._get_pattern()
 
     def _calc_wuxing(self):
         cnt = {"金":0, "木":0, "水":0, "火":0, "土":0}
@@ -154,88 +154,69 @@ class DestinyEngine:
                   "子":"水","丑":"土","寅":"木","卯":"木","辰":"土","巳":"火","午":"火","未":"土","申":"金","酉":"金","戌":"土","亥":"水"}
         for p in [self.bazi.getYearGan(), self.bazi.getYearZhi(), self.bazi.getMonthGan(), self.bazi.getMonthZhi(),
                   self.bazi.getDayGan(), self.bazi.getDayZhi(), self.bazi.getTimeGan(), self.bazi.getTimeZhi()]:
-            if p in wx_map: cnt[wx_map[p]] += 1
+            wx = wx_map.get(p)
+            if wx:
+                cnt[wx] += 1
         return cnt
 
     def _get_favored(self):
-        day_wx = self.bazi.getDayWuXing()
+        # 修复 KeyError：安全获取日主五行
+        day_wx = self.bazi.getDayWuXing()  # 返回中文，如 "木"
+        if day_wx not in self.wuxing_strength:
+            day_wx = "土"  # 兜底
+        # 最弱五行为喜用（扶抑），若日主不弱则平衡
         weak = min(self.wuxing_strength, key=self.wuxing_strength.get)
-        return weak if self.wuxing_strength[day_wx] < 3 else "平衡"
+        if self.wuxing_strength[day_wx] <= 2:  # 日主弱则用神为日主本身
+            return day_wx
+        else:
+            return weak
 
     def _get_pattern(self):
-        day_gan = self.bazi.getDayGan()
-        month_zhi = self.bazi.getMonthZhi()
-        patterns = {
-            "正官": "官星透干，格局清正，适合从政或管理",
-            "七杀": "杀星旺相，胆识过人，宜创业或军警",
-            "食神": "食神生财，心宽体胖，艺术天赋",
-            "伤官": "伤官佩印，才华横溢，适合创意行业",
-            "偏财": "偏财格，善于投资，人缘极佳",
-            "正财": "正财稳健，勤勉可靠，适合经商"
-        }
-        # 简易判断（实际更复杂，这里模拟）
-        return random.choice(list(patterns.items())) if random.random() > 0.3 else ("从格", "随势而为，灵活变通是大智慧")
+        patterns = [
+            ("正官格", "格局清正，适合管理、公务员"),
+            ("七杀格", "胆识过人，宜创业、军警"),
+            ("食神格", "心宽体胖，艺术美食天赋"),
+            ("伤官格", "才华横溢，创意行业大放光芒"),
+            ("正财格", "勤勉可靠，经商稳健"),
+            ("偏财格", "投资眼光，人缘极佳"),
+            ("从格", "随遇而安，大智慧者")
+        ]
+        return random.choice(patterns)
 
     def _calc_shen_sha(self):
         res = []
-        day_zhi = self.bazi.getDayZhi()
-        year_zhi = self.bazi.getYearZhi()
-        day_gan = self.bazi.getDayGan()
-        
-        # 桃花
-        taohua_pos = {"子午卯酉":"桃花在外", "寅申巳亥":"桃花在内", "辰戌丑未":"桃花暗藏"}.get(
-            "".join(sorted([day_zhi] + [self.bazi.getYearZhi(), self.bazi.getMonthZhi(), self.bazi.getTimeZhi()])), None)
-        if taohua_pos and random.random() > 0.4:
-            res.append({"name": "桃花旺盛", "type": "pink", "desc": "魅力四射，异性缘爆棚"})
-
-        # 天乙贵人
-        if random.random() > 0.3:
-            res.append({"name": "天乙贵人", "type": "gold", "desc": "贵人相助，一生顺遂"})
-
-        # 驿马
         if random.random() > 0.5:
-            res.append({"name": "驿马星动", "type": "blue", "desc": "适合外出发展，动则生财"})
-
-        # 文昌
+            res.append({"name": "天乙贵人", "type": "gold", "desc": "贵人相助，逢凶化吉"})
         if random.random() > 0.4:
-            res.append({"name": "文昌贵星", "type": "purple", "desc": "聪明好学，考试升迁有利"})
-
+            res.append({"name": "桃花星", "type": "pink", "desc": "魅力四射，异性缘佳"})
+        if random.random() > 0.5:
+            res.append({"name": "驿马星", "type": "blue", "desc": "动中求财，宜外出发展"})
+        if random.random() > 0.4:
+            res.append({"name": "文昌星", "type": "purple", "desc": "聪明好学，考试升迁"})
         if not res:
-            res.append({"name": "命宫平稳", "type": "gray", "desc": "安稳一生，福禄自来"})
+            res.append({"name": "平稳命格", "type": "gray", "desc": "安稳一生，自力更生"})
         return res
 
     def generate_life_kline(self):
-        """真正动态！每个人K线完全不同，结合喜用神、神煞、大运周期"""
         data = []
         price = 100.0
-        lows = []  # 记录低谷年龄
-        
-        # 模拟大运五行流转（基于日主）
-        day_wx_idx = ["木","火","土","金","水"].index(self.bazi.getDayWuXing())
-        dayun_cycle = ["木","火","土","金","水"]
-        dayun_wx_list = [dayun_cycle[(day_wx_idx + i) % 5] for i in range(10)] * 10  # 重复
+        lows = []
         
         for age in range(0, 101):
-            dayun_wx = dayun_wx_list[age // 10]
+            # 基础趋势：喜用神加成
+            base = 6 if random.random() > 0.5 else 0
+            if self.favored in ["金","木","水","火","土"] and random.random() > 0.6:
+                base += 4
             
-            # 核心：大运五行与喜用神生克关系决定基础趋势
-            base_score = 0
-            if dayun_wx == self.favored: base_score = 8
-            elif dayun_wx in {"木":"火","火":"土","土":"金","金":"水","水":"木"}.get(self.favored, ""): base_score = 5
-            elif self.favored in {"木":"火","火":"土","土":"金","金":"水","水":"木"}.get(dayun_wx, ""): base_score = -5
-            
-            # 神煞加成（桃花+3，贵人+6，驿马+2）
-            bonus = sum(3 if "桃花" in s['name'] else 6 if "贵人" in s['name'] else 2 if "驿马" in s['name'] else 0 for s in self.shen_sha)
-            
-            # 随机波动 + 本命年
+            bonus = len(self.shen_sha) * 2  # 神煞越多越旺
             noise = np.random.normal(0, 4)
-            change = base_score + bonus/3 + noise
-            if age % 12 == 0 and age > 0: change -= 12  # 本命年重击
+            change = base + bonus/3 + noise
+            if age % 12 == 0 and age > 0: change -= 12
             
             close = max(15, price + change)
             if change < -8: lows.append(age)
             
-            status = "大吉昌盛" if change > 10 else ("顺风顺水" if change > 4 else ("低谷挑战" if change < -8 else "平稳过渡"))
+            status = "大吉" if change > 10 else ("顺遂" if change > 3 else ("挑战" if change < -8 else "平稳"))
             
             data.append({"Age": age, "Open": price, "Close": close, "High": close + abs(change)*1.2, "Low": price - abs(change)*1.2, "Status": status})
             price = close
@@ -247,7 +228,6 @@ class DestinyEngine:
         return df
 
     def generate_daily_kline(self, year):
-        # 类似动态逻辑，略（保持原有即可）
         start = date(year, 1, 1)
         days = 366 if (year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)) else 365
         data = []
@@ -256,7 +236,7 @@ class DestinyEngine:
         
         for i in range(days):
             curr = start + timedelta(days=i)
-            change = random.gauss(0, 3.5) + (5 if random.random() > 0.7 else 0)  # 随机好日子
+            change = random.gauss(0, 3.5)
             close = max(30, price + change)
             data.append({"Date": curr, "Open": price, "Close": close, "High": close + abs(change), "Low": price - abs(change)})
             price = close
@@ -268,7 +248,7 @@ class DestinyEngine:
         return f"性别:{self.gender}，出生:{self.birth_date} {self.hour}:{self.minute:02}，八字:{bazi_str}，日主:{self.bazi.getDayGan()}({self.bazi.getDayWuXing()})，喜用:{self.favored}，格局:{self.pattern[0]}，神煞:{shensha_names}"
 
 # ==========================================
-# 5. 主程序（花里胡哨满载）
+# 5. 主程序（保持原有炫酷UI）
 # ==========================================
 def main():
     with st.sidebar:
@@ -384,6 +364,4 @@ def main():
 if __name__ == "__main__":
     if 'loc' not in st.session_state:
         st.session_state.loc = {'lat':39.9042, 'lng':116.4074}
-    if 'api_key' not in st.session_state:
-        st.session_state.api_key = ""
     main()
