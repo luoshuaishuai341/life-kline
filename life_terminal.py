@@ -15,7 +15,7 @@ from geopy.exc import GeocoderTimedOut, GeocoderUnavailable
 # ==========================================
 
 st.set_page_config(
-    page_title="天机 · 全息排盘系统 (高精版)",
+    page_title="天机 · 全息排盘系统 (Pro Max)",
     page_icon="🛰️",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -33,38 +33,35 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 加载 GitHub 行政区划数据 (JSON)
+# 2. 数据加载 (增强版)
 # ==========================================
 
 @st.cache_data
 def load_admin_data():
-    """读取 pcas-code.json 文件 (增强版路径识别)"""
-    # 1. 尝试直接读取 (本地开发常见)
-    file_path = "pcas-code.json"
-    if os.path.exists(file_path):
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except:
-            pass
-
-    # 2. 尝试使用当前文件的绝对路径拼接 (云端部署常见)
+    """读取行政区划数据"""
+    # 优先寻找 pcas-code.json (4级), 其次 pca-code.json (3级)
+    files_to_check = ["pcas-code.json", "pca-code.json"]
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    file_path_abs = os.path.join(current_dir, "pcas-code.json")
-    if os.path.exists(file_path_abs):
-        try:
-            with open(file_path_abs, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except:
-            pass
-            
-    return None
+    
+    for filename in files_to_check:
+        # 检查本地路径
+        paths = [filename, os.path.join(current_dir, filename)]
+        for p in paths:
+            if os.path.exists(p):
+                try:
+                    with open(p, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        # 简单的有效性检查
+                        if isinstance(data, list) and len(data) > 0:
+                            return data, filename
+                except:
+                    continue
+    return None, None
 
-# !!! 关键点：这里必须初始化全局变量，否则 main 函数会报错 !!!
-ADMIN_DATA = load_admin_data()
+ADMIN_DATA, LOADED_FILENAME = load_admin_data()
 
 # ==========================================
-# 3. 核心计算引擎 (含精确地理编码)
+# 3. 核心定位引擎
 # ==========================================
 
 @st.cache_data(show_spinner=False)
@@ -72,7 +69,8 @@ def get_precise_location(full_address_str):
     """
     调用 OpenStreetMap API 获取真实、精确的经纬度。
     """
-    geolocator = Nominatim(user_agent="life_kline_v9_fix")
+    # 这里的 user_agent 最好改得独特一点，避免被服务器限制
+    geolocator = Nominatim(user_agent="bazi_pro_app_v10")
     try:
         # 加上 China 提高国内地址识别率
         search_query = f"China {full_address_str}"
@@ -86,7 +84,7 @@ def get_precise_location(full_address_str):
                 "address": location.address
             }
         else:
-            return {"success": False, "msg": "卫星未定位到该具体建筑，建议简化地址或手动输入坐标"}
+            return {"success": False, "msg": "卫星未匹配到该地址，已使用默认坐标"}
             
     except (GeocoderTimedOut, GeocoderUnavailable):
         return {"success": False, "msg": "定位服务连接超时，请重试"}
@@ -100,7 +98,6 @@ class DestinyEngine:
         self.lat = lat
         self.lng = lng
         
-        # 真太阳时计算
         self.solar = Solar.fromYmdHms(
             birth_date.year, birth_date.month, birth_date.day,
             birth_time.hour, birth_time.minute, 0
@@ -171,7 +168,7 @@ class DestinyEngine:
         return pd.DataFrame(data)
 
 # ==========================================
-# 4. 页面渲染逻辑
+# 4. 页面逻辑
 # ==========================================
 
 def main():
@@ -192,96 +189,92 @@ def main():
         st.caption(f"农历: {t_lunar.getYearInGanZhi()}年 {t_lunar.getMonthInChinese()}月{t_lunar.getDayInChinese()}")
         
         st.markdown("---")
+        st.markdown("#### 📍 出生地 (级联定位)")
         
-        # --- 核心升级：4级联动地址选择 ---
-        st.markdown("#### 📍 出生地 (4级联动定位)")
-        
-        # 检查数据是否加载成功
+        full_query_address = "Beijing"
+        final_lat, final_lng = 39.90, 116.40
+
         if ADMIN_DATA is None:
-            st.error("⚠️ 未读取到 pcas-code.json")
-            st.info("请确保该文件已上传到 GitHub 仓库根目录，并点击了 commit。")
-            # 降级方案，防止报错
-            full_query_address = "Beijing"
-            final_lat, final_lng = 39.90, 116.40
+            st.error("❌ 未找到数据文件")
+            st.warning("请确保已上传 pcas-code.json (推荐) 或 pca-code.json 到 GitHub 仓库。")
+            st.caption("暂使用默认坐标")
         else:
             # 1. 省
             province_names = [p['name'] for p in ADMIN_DATA]
             sel_prov_name = st.selectbox("省 / 直辖市", province_names)
-            
-            # 获取选中的省数据
             prov_data = next(p for p in ADMIN_DATA if p['name'] == sel_prov_name)
             
-            # 2. 市
+            # 2. 市 (处理直辖市逻辑)
             city_list = prov_data.get('children', [])
-            # 处理直辖市或没有子级的情况
-            if not city_list:
-                city_names = [sel_prov_name]
-                city_data = prov_data # 降级处理
+            # 如果是直辖市（如北京），数据里第二级通常是“市辖区”
+            # 我们直接跳过“市辖区”显示，但在逻辑上保留它
+            is_direct_city = (sel_prov_name in ["北京市", "天津市", "上海市", "重庆市"])
+            
+            if is_direct_city and city_list and city_list[0]['name'] == "市辖区":
+                 # 直辖市直接把“市辖区”作为当前选中，不让用户选了，太罗嗦
+                city_data = city_list[0]
+                sel_city_name = sel_prov_name # 显示上就叫北京市
+            elif not city_list:
+                city_data = prov_data
+                sel_city_name = sel_prov_name
             else:
                 city_names = [c['name'] for c in city_list]
-            
-            sel_city_name = st.selectbox("城市", city_names)
-            # 获取选中的市数据
-            if city_list:
+                sel_city_name = st.selectbox("城市", city_names)
                 city_data = next(c for c in city_list if c['name'] == sel_city_name)
-            else:
-                city_data = prov_data
 
             # 3. 区/县
             area_list = city_data.get('children', [])
-            if not area_list:
-                area_names = ["市辖区"]
-            else:
-                area_names = [a['name'] for a in area_list]
-                
-            sel_area_name = st.selectbox("区 / 县", area_names)
-            
-            # 获取选中的区数据
+            sel_area_name = ""
             if area_list:
+                area_names = [a['name'] for a in area_list]
+                sel_area_name = st.selectbox("区 / 县", area_names)
                 area_data = next(a for a in area_list if a['name'] == sel_area_name)
             else:
-                area_data = city_data # 降级
+                area_data = city_data # 没有区县数据，降级
 
-            # 4. 街道/乡镇
+            # 4. 街道/乡镇 (如果有数据)
             street_list = area_data.get('children', [])
-            if not street_list:
-                street_names = ["默认街道"]
-            else:
+            sel_street_name = ""
+            if street_list:
                 street_names = [s['name'] for s in street_list]
-            
-            sel_street_name = st.selectbox("街道 / 乡镇", street_names)
+                sel_street_name = st.selectbox("街道 / 乡镇", street_names)
             
             # 5. 详细地址
-            st.caption("👇 输入具体建筑可提高真太阳时精度")
-            sel_detail = st.text_input("详细地点", placeholder="例: 第一人民医院 / 幸福小区5号楼")
+            sel_detail = st.text_input("详细地点", placeholder="例: 协和医院 / 1号楼 (输入越准，定位越准)")
             
-            # 拼接完整地址
-            if sel_prov_name == sel_city_name:
-                full_query_address = f"{sel_prov_name}{sel_area_name}{sel_street_name}{sel_detail}"
-            else:
-                full_query_address = f"{sel_prov_name}{sel_city_name}{sel_area_name}{sel_street_name}{sel_detail}"
-
+            # 智能拼接地址
+            parts = [sel_prov_name, sel_city_name, sel_area_name, sel_street_name, sel_detail]
+            # 去重（防止出现 北京市北京市）并过滤空值
+            clean_parts = []
+            seen = set()
+            for p in parts:
+                if p and p not in seen and p != "市辖区":
+                    clean_parts.append(p)
+                    seen.add(p)
+            
+            full_query_address = "".join(clean_parts)
+            
             # 触发定位
             locate_btn = st.button("🛰️ 获取精确经纬度", type="primary", use_container_width=True)
             
-            if 'location_cache' not in st.session_state:
-                st.session_state['location_cache'] = (39.90, 116.40, "等待定位...")
+            # Session State 缓存定位结果
+            if 'loc_res' not in st.session_state:
+                st.session_state['loc_res'] = None
 
             if locate_btn:
-                with st.spinner(f"正在卫星定位: {full_query_address}..."):
-                    loc_res = get_precise_location(full_query_address)
-                
+                with st.spinner(f"正在定位: {full_query_address}..."):
+                    res = get_precise_location(full_query_address)
+                    st.session_state['loc_res'] = res
+            
+            # 读取缓存结果
+            loc_res = st.session_state['loc_res']
+            if loc_res:
                 if loc_res['success']:
-                    st.session_state['location_cache'] = (loc_res['lat'], loc_res['lng'], f"✅ 已定位: {loc_res['address']}")
+                    final_lat = loc_res['lat']
+                    final_lng = loc_res['lng']
+                    st.markdown(f"<div class='location-success'>✅ {loc_res['address']}</div>", unsafe_allow_html=True)
                 else:
-                    st.session_state['location_cache'] = (39.90, 116.40, f"⚠️ {loc_res['msg']}")
-            
-            final_lat, final_lng, loc_status_msg = st.session_state['location_cache']
-            
-            if "✅" in loc_status_msg:
-                st.markdown(f"<div class='location-success'>{loc_status_msg}</div>", unsafe_allow_html=True)
-            elif "⚠️" in loc_status_msg:
-                st.markdown(f"<div class='location-warning'>{loc_status_msg}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='location-warning'>⚠️ {loc_res['msg']}</div>", unsafe_allow_html=True)
 
         st.markdown("---")
         page = st.radio("功能导航", ["📊 人生大盘 (总览)", "📅 流年日线 (详情)", "⚡ 五行能量 (分析)", "🍀 每日宜忌 (指引)"])
@@ -295,8 +288,8 @@ def main():
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("八字日主", info['wuxing_main'], f"{info['shengxiao']}年")
     c2.metric("当前虚岁", f"{info['yun_age']} 岁", "按立春计")
-    c3.metric("真太阳时偏差", info['true_solar_diff'], "基于精确经度")
-    c4.metric("出生经纬度", f"{final_lng:.4f}, {final_lat:.4f}")
+    c3.metric("真太阳时偏差", info['true_solar_diff'], "基于经度")
+    c4.metric("精准坐标", f"{final_lng:.4f}, {final_lat:.4f}")
     st.divider()
 
     # 1. 人生大盘
