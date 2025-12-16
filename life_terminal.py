@@ -4,7 +4,7 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from lunar_python import Solar
-from datetime import datetime
+from datetime import datetime, time
 import random
 
 # ==========================================
@@ -205,7 +205,8 @@ def main():
             input_lng = st.number_input("LNG (经度)", 120.2, help="出生地经度，用于真太阳时")
             
         input_date = st.date_input("IPO DATE (出生日期)", datetime(2000, 1, 1))
-        input_time = st.time_input("IPO TIME (出生时间)", datetime(12, 0))
+        # input_time = st.time_input("IPO TIME (出生时间)", datetime(12, 0))
+        input_time = st.time_input("IPO TIME (出生时间)", time(12, 0))
         
         st.markdown("---")
         generate_btn = st.button("INITIATE_SEQUENCE (生成图表)", type="primary", use_container_width=True)
