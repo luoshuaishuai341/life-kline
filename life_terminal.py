@@ -124,7 +124,7 @@ def call_ai_analysis(api_key, base_url, context, kline_lows):
         return f"⚠️ 网络异常: {str(e)}"
 
 # ==========================================
-# 4. 核心引擎（修复 KeyError + 动态个性化）
+# 4. 核心引擎（修复所有已知问题）
 # ==========================================
 class DestinyEngine:
     def __init__(self, b_date: date, hour: int, minute: int, lat: float, lng: float, gender: str):
@@ -160,13 +160,11 @@ class DestinyEngine:
         return cnt
 
     def _get_favored(self):
-        # 修复 KeyError：安全获取日主五行
-        day_wx = self.bazi.getDayWuXing()  # 返回中文，如 "木"
+        day_wx = self.bazi.getDayWuXing()
         if day_wx not in self.wuxing_strength:
-            day_wx = "土"  # 兜底
-        # 最弱五行为喜用（扶抑），若日主不弱则平衡
+            day_wx = "土"  # 安全兜底
         weak = min(self.wuxing_strength, key=self.wuxing_strength.get)
-        if self.wuxing_strength[day_wx] <= 2:  # 日主弱则用神为日主本身
+        if self.wuxing_strength[day_wx] <= 2:
             return day_wx
         else:
             return weak
@@ -203,12 +201,11 @@ class DestinyEngine:
         lows = []
         
         for age in range(0, 101):
-            # 基础趋势：喜用神加成
             base = 6 if random.random() > 0.5 else 0
             if self.favored in ["金","木","水","火","土"] and random.random() > 0.6:
                 base += 4
             
-            bonus = len(self.shen_sha) * 2  # 神煞越多越旺
+            bonus = len(self.shen_sha) * 2
             noise = np.random.normal(0, 4)
             change = base + bonus/3 + noise
             if age % 12 == 0 and age > 0: change -= 12
@@ -248,7 +245,7 @@ class DestinyEngine:
         return f"性别:{self.gender}，出生:{self.birth_date} {self.hour}:{self.minute:02}，八字:{bazi_str}，日主:{self.bazi.getDayGan()}({self.bazi.getDayWuXing()})，喜用:{self.favored}，格局:{self.pattern[0]}，神煞:{shensha_names}"
 
 # ==========================================
-# 5. 主程序（保持原有炫酷UI）
+# 5. 主程序（修复 .dt 错误）
 # ==========================================
 def main():
     with st.sidebar:
@@ -353,12 +350,15 @@ def main():
 
     with tab5:
         st.markdown("### 🔥 全年运势热力图（红旺蓝弱）")
-        df_daily = engine.generate_daily_kline(datetime.now().year)
+        current_year = datetime.now().year
+        df_daily = engine.generate_daily_kline(current_year)
+        # 修复 .dt 错误：先转换为 pandas datetime
+        df_daily['Date'] = pd.to_datetime(df_daily['Date'])
         df_daily['月'] = df_daily['Date'].dt.month
         df_daily['日'] = df_daily['Date'].dt.day
         fig_heat = px.density_heatmap(df_daily, x="日", y="月", z="Close", 
                                      color_continuous_scale="plasma", nbinsx=31, nbinsy=12,
-                                     title="今年运势热力分布")
+                                     title=f"{current_year}年运势热力分布")
         st.plotly_chart(fig_heat, use_container_width=True)
 
 if __name__ == "__main__":
