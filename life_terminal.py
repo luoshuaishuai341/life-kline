@@ -248,7 +248,7 @@ def main():
         st.markdown("#### 📅 出生时间")
         col_y, col_m, col_d = st.columns(3)
         current_year = datetime.now().year
-        # 出生年下拉框：从1900开始（保留历史支持），默认当前年
+        # 出生年下拉框：从1900开始，默认当前年
         year = col_y.selectbox("年", range(1900, current_year + 1), index=current_year - 1900)
         month = col_m.selectbox("月", range(1,13), format_func=lambda x: f"{x}月")
         day_max = (date(year, month+1, 1) - timedelta(days=1)).day if month < 12 else 31
@@ -258,7 +258,7 @@ def main():
         hour = col_h.selectbox("时辰", range(24))
         minute = col_min.selectbox("分钟", range(60))
         
-        st.markdown("#### 📍 出生地点（精确到县）")
+        st.markdown("#### 📍 出生地点（精确到县镇）")
         full_addr = "北京市"
         if ADMIN_DATA:
             provs = [p['name'] for p in ADMIN_DATA]
@@ -274,15 +274,22 @@ def main():
                 city = st.selectbox("地级市", city_names)
                 city_d = next(c for c in cities if c['name']==city) if cities else prov_d
             
+            # 精确到县/区
             counties = city_d.get('children', [])
             county_names = [c['name'] for c in counties] if counties else ["市辖区"]
             county = st.selectbox("区/县", county_names)
+            county_d = next(c for c in counties if c['name']==county) if counties else city_d
             
-            detail = st.text_input("详细地址（如乡镇、医院）", "人民医院")
-            full_addr = f"{prov}{city}{county}{detail}"
+            # 精确到镇/乡/街道
+            towns = county_d.get('children', [])
+            town_names = [t['name'] for t in towns] if towns else ["无镇/乡"]
+            town = st.selectbox("镇/乡/街道", town_names)
+            
+            detail = st.text_input("详细地址（如村、医院、门牌）", "人民医院")
+            full_addr = f"{prov}{city}{county}{town if town != '无镇/乡' else ''}{detail}"
         else:
             st.warning("未加载区划数据，使用默认")
-            full_addr = st.text_input("手动输入完整地址", "北京市朝阳区")
+            full_addr = st.text_input("手动输入完整地址", "北京市朝阳区三里屯")
         
         if st.button("🛰️ 精准定位 & 排盘", type="primary", use_container_width=True):
             with st.spinner("天机正在推演..."):
@@ -302,7 +309,7 @@ def main():
     col1.markdown(f"<div class='metric-box'><div class='metric-title'>八字</div><div class='metric-value'>{bazi_str}</div></div>", unsafe_allow_html=True)
     col2.markdown(f"<div class='metric-box'><div class='metric-title'>格局</div><div class='metric-value'>{engine.pattern[0]}</div></div>", unsafe_allow_html=True)
     col3.markdown(f"<div class='metric-box'><div class='metric-title'>喜用神</div><div class='metric-value'>{engine.favored}</div></div>", unsafe_allow_html=True)
-    col4.markdown(f"<div class='metric-box'><div class='metric-title'>虚岁</div><div class='metric-value'>{current_year - year + 1}</div></div>", unsafe_allow_html=True)
+    col4.markdown(f"<div class='metric-box'><div class='metric-title'>虚岁</div><div class='metric-value'>{datetime.now().year - year + 1}</div></div>", unsafe_allow_html=True)
     col5.markdown(f"<div class='metric-box'><div class='metric-title'>真太阳时差</div><div class='metric-value'>{engine.true_solar_diff:+.1f}分</div></div>", unsafe_allow_html=True)
 
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["📈 百年人生K线", "📅 流年日运", "🌟 神煞星耀", "🔥 运势热力图", "🔮 AI 大师解盘"])
@@ -331,8 +338,8 @@ def main():
 
     with tab2:
         st.markdown("### 📅 流年每日运势")
-        # 流年查询滑块从1990年开始
-        q_year = st.slider("选择年份", min_value=1990, max_value=current_year + 20, value=current_year, step=1)
+        # 流年查询滑块从1990开始
+        q_year = st.slider("选择年份", min_value=1990, max_value=datetime.now().year + 20, value=datetime.now().year, step=1)
         df_daily = engine.generate_daily_kline(q_year)
         fig_d = go.Figure(go.Candlestick(x=df_daily['日期'], open=df_daily['开盘'], high=df_daily['最高'],
                                          low=df_daily['最低'], close=df_daily['收盘'],
