@@ -34,7 +34,6 @@ st.markdown("""
     }
     .metric-label { color: #666; font-size: 0.9em; margin-bottom: 5px; }
     .metric-value { color: #8e24aa; font-size: 1.8em; font-weight: bold; }
-    .metric-sub { color: #999; font-size: 0.8em; }
     
     .location-success { color: #155724; background-color: #d4edda; border: 1px solid #c3e6cb; padding: 10px; border-radius: 5px; }
     .location-warning { color: #856404; background-color: #fff3cd; border: 1px solid #ffeeba; padding: 10px; border-radius: 5px; }
@@ -60,24 +59,41 @@ def load_admin_data():
 ADMIN_DATA, _ = load_admin_data()
 
 # ==========================================
-# 3. 定位服务
+# 3. 定位服务 (修复 KeyError 核心)
 # ==========================================
 @st.cache_data(show_spinner=False)
 def get_precise_location(addr):
     ua = f"life_kline_{random.randint(10000,99999)}"
+    # 默认坐标 (北京) - 用于降级
+    default_res = {"success": False, "lat": 39.9042, "lng": 116.4074, "msg": "定位失败，已使用默认坐标"}
+    
     try:
-        loc = Nominatim(user_agent=ua).geocode(f"China {addr}" if "China" not in addr else addr, timeout=8)
-        if loc: return {"success": True, "lat": loc.latitude, "lng": loc.longitude, "address": loc.address}
-    except Exception: pass
-    return {"success": False, "msg": "定位失败，已使用默认坐标"}
+        geolocator = Nominatim(user_agent=ua)
+        loc = geolocator.geocode(f"China {addr}" if "China" not in addr else addr, timeout=8)
+        
+        if loc:
+            return {
+                "success": True, 
+                "lat": loc.latitude, 
+                "lng": loc.longitude, 
+                "address": loc.address
+            }
+        else:
+            # 即使没找到，也要返回 lat/lng，防止 KeyError
+            return default_res
+            
+    except Exception as e: 
+        # 发生异常时，同样返回带 lat/lng 的默认值
+        default_res["msg"] = f"定位服务异常: {str(e)}"
+        return default_res
 
 # ==========================================
-# 4. 核心命理引擎 (重构算法版)
+# 4. 核心命理引擎
 # ==========================================
 class DestinyEngine:
     def __init__(self, b_date, h, m, s, lat, lng, gender):
         self.birth_date = b_date
-        self.gender = gender # "男" or "女"
+        self.gender = gender 
         self.solar = Solar.fromYmdHms(b_date.year, b_date.month, b_date.day, h, m, s)
         self.lunar = self.solar.getLunar()
         self.bazi = self.lunar.getEightChar()
@@ -103,7 +119,6 @@ class DestinyEngine:
             "庚":"金", "辛":"金", "申":"金", "酉":"金",
             "壬":"水", "癸":"水", "亥":"水", "子":"水"
         }
-        # 遍历四柱干支
         pillars = [
             self.bazi.getYearGan(), self.bazi.getYearZhi(),
             self.bazi.getMonthGan(), self.bazi.getMonthZhi(),
@@ -113,7 +128,6 @@ class DestinyEngine:
         
         for char in pillars:
             if char in wx_map:
-                # 月支权重加倍 (得令)
                 weight = 1.5 if char == self.bazi.getMonthZhi() else 1.0
                 strength[wx_map[char]] += weight
         
@@ -121,39 +135,27 @@ class DestinyEngine:
         return {k: round(v/total*100, 1) for k,v in strength.items()}
 
     def _calc_favored_element(self):
-        """简单计算喜用神 (扶抑格逻辑：弱者喜生扶，强者喜克泄)"""
-        # 1. 找出日主五行
+        """简单计算喜用神"""
         day_master = self.bazi.getDayGan()
         gan_wx = {"甲":"木", "乙":"木", "丙":"火", "丁":"火", "戊":"土", "己":"土", "庚":"金", "辛":"金", "壬":"水", "癸":"水"}
         dm_wx = gan_wx.get(day_master, "木")
         
-        # 2. 计算日主同党分数 (比劫+印枭)
         sheng_ke_map = {"木":["水","木"], "火":["木","火"], "土":["火","土"], "金":["土","金"], "水":["金","水"]}
         friends = sheng_ke_map.get(dm_wx, [])
         friend_score = sum(self.wuxing_strength[wx] for wx in friends)
         
-        # 3. 判定强弱
-        is_strong = friend_score > 45 # 简化阈值
+        is_strong = friend_score > 45 
         
-        # 4. 定喜用
-        # 生克链: 木->火->土->金->水->木
         generate = {"木":"火", "火":"土", "土":"金", "金":"水", "水":"木"}
-        overcome = {"木":"土", "土":"水", "水":"火", "火":"金", "金":"木"}
-        
         if is_strong:
-            # 身强，喜克(官杀)、泄(食伤)、耗(财) -> 即非同党
-            # 简化：取克我者或我生者
-            return generate[dm_wx] # 喜食伤泄秀
+            return generate[dm_wx] 
         else:
-            # 身弱，喜生(印枭)、扶(比劫)
-            # 简化：取生我者
             reverse_gen = {v:k for k,v in generate.items()}
-            return reverse_gen[dm_wx] # 喜印绶护身
+            return reverse_gen[dm_wx]
 
     def _calc_ming_gua(self):
-        """计算本命卦 (三元命)"""
+        """计算本命卦"""
         year = self.birth_date.year
-        # 公式简化版
         digits_sum = sum(int(d) for d in str(year))
         while digits_sum > 9: digits_sum = sum(int(d) for d in str(digits_sum))
         
@@ -164,76 +166,58 @@ class DestinyEngine:
             
         while res > 9: res -= 9
         if res == 0: res = 9
-        
-        # 5寄坤(男2)艮(女8)
         if res == 5: res = 2 if self.gender == "男" else 8
         
         gua_map = {1:"坎水", 2:"坤土", 3:"震木", 4:"巽木", 6:"乾金", 7:"兑金", 8:"艮土", 9:"离火"}
         return gua_map.get(res, "未知")
 
     def _get_year_wuxing(self, year):
-        """获取流年纳音或正五行"""
-        # 简化：仅取流年地支的主气五行
-        # 计算流年干支
-        # 年份 - 4 % 60 -> 干支索引
-        # 这里为了简化，直接模拟流年五行轮转
         wuxing_cycle = ["金", "水", "木", "火", "土"]
         return wuxing_cycle[year % 5]
 
     def generate_optimized_life_kline(self):
-        """
-        [算法核心] 基于五行生克生成人生K线
-        """
+        """五行生克生成人生K线"""
         data = []
         price = 100.0
-        favored = self.favored_element # 喜用神
+        favored = self.favored_element 
         
-        # 五行生克关系表
-        # key生value
         generate = {"木":"火", "火":"土", "土":"金", "金":"水", "水":"木"} 
-        # key克value
         overcome = {"木":"土", "土":"水", "水":"火", "火":"金", "金":"木"}
         
         random.seed(self.seed)
         
         for age in range(101):
             year = self.birth_date.year + age
-            
-            # 1. 获取流年五行 (模拟)
             current_year_wx = self._get_year_wuxing(year)
             
-            # 2. 判定生克关系 (Score Calculation)
             change_pct = 0
             reason = ""
             
             if current_year_wx == favored:
-                change_pct = 4.0 # 同气相求，大吉
+                change_pct = 4.0 
                 reason = f"流年{current_year_wx} 助旺喜用神"
             elif generate[current_year_wx] == favored:
-                change_pct = 6.0 # 生入，大吉大利
+                change_pct = 6.0 
                 reason = f"流年{current_year_wx} 生扶喜用神"
             elif generate[favored] == current_year_wx:
-                change_pct = 1.0 # 生出，平稳
-                reason = f"喜用生流年，付出有成"
+                change_pct = 1.0 
+                reason = f"喜用生流年"
             elif overcome[current_year_wx] == favored:
-                change_pct = -5.0 # 克入，凶
+                change_pct = -5.0 
                 reason = f"流年{current_year_wx} 克制喜用神"
             elif overcome[favored] == current_year_wx:
-                change_pct = 2.0 # 克出，辛苦得财
-                reason = f"喜用克流年，掌控局势"
+                change_pct = 2.0 
+                reason = f"喜用克流年"
             
-            # 加入随机扰动 (天有不测风云)
             noise = random.normalvariate(0, 1.5)
             final_change = change_pct + noise
             
-            # 本命年惯性下跌
             if age > 0 and age % 12 == 0:
                 final_change -= 4
                 reason = "本命年值太岁"
                 
             close = max(30, price + final_change)
             
-            # 状态文案
             if final_change > 4: status = "大吉"
             elif final_change > 1: status = "上升"
             elif final_change > -2: status = "平稳"
@@ -245,8 +229,7 @@ class DestinyEngine:
                 "High": close + abs(final_change)*0.6,
                 "Low": price - abs(final_change)*0.6,
                 "Status": status,
-                "Reason": reason,
-                "YearWx": current_year_wx
+                "Reason": reason
             })
             price = close
             
@@ -255,7 +238,6 @@ class DestinyEngine:
         return df
 
     def get_basic_info(self):
-        """返回所有面板需要的数据"""
         return {
             "bazi_text": f"{self.bazi.getYearGan()}{self.bazi.getYearZhi()} {self.bazi.getMonthGan()}{self.bazi.getMonthZhi()} {self.bazi.getDayGan()}{self.bazi.getDayZhi()} {self.bazi.getTimeGan()}{self.bazi.getTimeZhi()}",
             "day_master": self.bazi.getDayGan(),
@@ -278,19 +260,23 @@ def main():
         gender = st.selectbox("性别", ["男", "女"])
         
         st.markdown("#### 📅 出生信息")
-        # 日期选择器
         c1, c2, c3 = st.columns([1.2, 1, 1])
-        y = c1.selectbox("年", range(1930, 2026), index=60)
+        curr_year = datetime.now().year
+        y = c1.selectbox("年", range(1930, curr_year + 1), index=60)
         m = c2.selectbox("月", range(1, 13), format_func=lambda x:f"{x}月")
-        d = c3.selectbox("日", range(1, 32), format_func=lambda x:f"{x}日")
         
-        # 时间选择器
+        # 动态计算天数
+        if m in [1, 3, 5, 7, 8, 10, 12]: max_d = 31
+        elif m in [4, 6, 9, 11]: max_d = 30
+        else: max_d = 29 if (y%4==0 and (y%100!=0 or y%400==0)) else 28
+        
+        d = c3.selectbox("日", range(1, max_d + 1), format_func=lambda x:f"{x}日")
+        
         t1, t2 = st.columns(2)
         hh = t1.selectbox("时", range(24), index=12)
         mm = t2.selectbox("分", range(60))
         
         st.markdown("#### 📍 地点定位")
-        # 这里简化定位逻辑以便代码长度可控，逻辑同之前版本
         provs = [p['name'] for p in ADMIN_DATA] if ADMIN_DATA else ["北京市"]
         prov = st.selectbox("省份", provs)
         detail = st.text_input("详细地址", "市辖区")
@@ -300,12 +286,25 @@ def main():
                 res = get_precise_location(f"{prov}{detail}")
                 st.session_state.loc = res
     
-    # 获取定位或默认
-    loc = st.session_state.get('loc', {'lat':39.9, 'lng':116.4, 'success':False})
+    # 修复 KeyError：安全获取 lat/lng，如果不存在则使用默认值
+    loc_state = st.session_state.get('loc', {})
+    
+    # 无论定位是否成功，这里都必须保证有值，否则 DestinyEngine 初始化会崩
+    final_lat = loc_state.get('lat', 39.9042)
+    final_lng = loc_state.get('lng', 116.4074)
+    loc_msg = loc_state.get('msg', '等待定位')
+    loc_success = loc_state.get('success', False)
+
+    # 显示定位状态提示
+    if loc_success:
+        st.sidebar.markdown(f"<div class='location-success'>✅ {loc_state.get('address', '定位成功')}</div>", unsafe_allow_html=True)
+    elif "失败" in loc_msg or "异常" in loc_msg:
+         st.sidebar.markdown(f"<div class='location-warning'>⚠️ {loc_msg}</div>", unsafe_allow_html=True)
     
     # 实例化引擎
     b_date = date(y, m, d)
-    engine = DestinyEngine(b_date, hh, mm, 0, loc['lat'], loc['lng'], gender)
+    # 这里传入的是安全的 final_lat/final_lng，绝对不会报错
+    engine = DestinyEngine(b_date, hh, mm, 0, final_lat, final_lng, gender)
     info = engine.get_basic_info()
     
     # 页面标题
@@ -321,7 +320,7 @@ def main():
 
     # --- 核心：命盘总览 Dashboard ---
     
-    # 左侧：K线大势 (优化版)
+    # 左侧：K线大势
     st.subheader("📈 人生大势走势 (五行生克推演)")
     
     df_life = engine.generate_optimized_life_kline()
@@ -332,14 +331,14 @@ def main():
     # K线
     fig.add_trace(go.Candlestick(
         x=df_life['Age'], open=df_life['Open'], high=df_life['High'], low=df_life['Low'], close=df_life['Close'],
-        increasing_line_color='#8e24aa', decreasing_line_color='#2e7d32', # 紫气东来/绿色调整
+        increasing_line_color='#8e24aa', decreasing_line_color='#2e7d32', 
         name='运势',
-        text=df_life['Reason'], # 关键：这里传入了生克理由
+        text=df_life['Reason'], 
         hovertemplate=(
             "<b>%{x}岁 (%{text})</b><br>"
             "开盘: %{open:.1f}<br>"
             "收盘: %{close:.1f}<br>"
-            "状态: 大吉<br>" 
+            "状态: %{text}<br>" 
             "<extra></extra>"
         )
     ))
@@ -360,10 +359,8 @@ def main():
     
     with c_left:
         st.subheader("⚡ 五行强弱分布")
-        # 仪表盘卡片布局
         w = info['wuxing']
         
-        # 使用列布局显示具体数值
         w1, w2, w3, w4, w5 = st.columns(5)
         w1.markdown(f"<div class='metric-card'><div class='metric-label'>金</div><div class='metric-value'>{w['金']}%</div></div>", unsafe_allow_html=True)
         w2.markdown(f"<div class='metric-card'><div class='metric-label'>木</div><div class='metric-value'>{w['木']}%</div></div>", unsafe_allow_html=True)
