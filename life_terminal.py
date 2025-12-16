@@ -78,7 +78,7 @@ def get_precise_location(address_str: str):
         return {"success": False, "msg": f"定位异常: {str(e)}"}
 
 # ==========================================
-# 4. 核心命理引擎（支持精确到秒 + 修复八字方法调用）
+# 4. 核心命理引擎（支持精确到秒 + 完全兼容 lunar_python 方法）
 # ==========================================
 class DestinyEngine:
     def __init__(self, birth_date: date, hour: int, minute: int, second: int, lat: float, lng: float):
@@ -105,17 +105,26 @@ class DestinyEngine:
 
         time_diff = (self.lng - 120.0) * 4  # 东八区基准
 
-        # 正确获取八字四柱（兼容 lunar_python 所有版本）
+        # 正确获取八字四柱（兼容所有版本）
         year_pillar = self.bazi.getYear()        # 如：甲辰
         month_pillar = self.bazi.getMonth()      # 如：癸未
         day_pillar = self.bazi.getDay()          # 如：丁酉
         time_pillar = self.bazi.getTime()        # 如：壬辰
 
+        # 生肖使用英文版方法（所有版本都有），并手动映射到中文
+        shengxiao_en = self.lunar.getYearShengXiao()
+        shengxiao_map = {
+            "Rat": "鼠", "Ox": "牛", "Tiger": "虎", "Rabbit": "兔",
+            "Dragon": "龙", "Snake": "蛇", "Horse": "马", "Goat": "羊",
+            "Monkey": "猴", "Rooster": "鸡", "Dog": "狗", "Pig": "猪"
+        }
+        shengxiao_cn = shengxiao_map.get(shengxiao_en, shengxiao_en)
+
         return {
             "bazi": f"{year_pillar}　{month_pillar}　{day_pillar}　{time_pillar}",
             "day_master": self.bazi.getDayGan() + "（" + self.bazi.getDayWuXing() + "）",
-            "shengxiao": self.lunar.getYearShengXiaoInChinese(),
-            "nongli": f"{self.lunar.getYearInChinese()}年　{self.lunar.getMonthInChinese()}月{self.lunar.getDayInChinese()}",
+            "shengxiao": shengxiao_cn,
+            "nongli": f"{self.lunar.getYearInGanZhi()}年　{self.lunar.getMonthInChinese()}月{self.lunar.getDayInChinese()}",
             "age": age_nominal,
             "true_solar_diff": f"{time_diff:+.1f} 分钟",
             "wuxing": self._calc_wuxing()
@@ -176,7 +185,7 @@ class DestinyEngine:
         return pd.DataFrame(data)
 
 # ==========================================
-# 5. 主程序
+# 5. 主程序（其余部分不变）
 # ==========================================
 def main():
     with st.sidebar:
@@ -194,10 +203,13 @@ def main():
         minute = c2.selectbox("分", range(60))
         second = c3.selectbox("秒", range(60))
 
-        # 农历预览
+        # 农历预览（使用兼容方法）
         temp_solar = Solar.fromYmd(b_date.year, b_date.month, b_date.day)
         temp_lunar = temp_solar.getLunar()
-        st.caption(f"对应农历：{temp_lunar.getYearInGanZhi()}年 {temp_lunar.getMonthInChinese()}月{temp_lunar.getDayInChinese()}")
+        shengxiao_en = temp_lunar.getYearShengXiao()
+        shengxiao_map = {"Rat": "鼠", "Ox": "牛", "Tiger": "虎", "Rabbit": "兔", "Dragon": "龙", "Snake": "蛇", "Horse": "马", "Goat": "羊", "Monkey": "猴", "Rooster": "鸡", "Dog": "狗", "Pig": "猪"}
+        shengxiao_cn = shengxiao_map.get(shengxiao_en, shengxiao_en)
+        st.caption(f"对应农历：{temp_lunar.getYearInGanZhi()}年（{shengxiao_cn}年） {temp_lunar.getMonthInChinese()}月{temp_lunar.getDayInChinese()}")
 
         st.markdown("#### 📍 出生地点（四级联动 + 详细地址）")
         
@@ -349,7 +361,7 @@ def main():
         st.markdown(f"""
         <div style="background:#fffbf0; padding:25px; border-radius:12px; border:1px solid #ffe0b2;">
             <h3 style="color:#d32f2f;">{q_date}（今日）</h3>
-            <p style="font-size:1.2em;">农历 {q_lunar.getYearInChinese()}年 {q_lunar.getMonthInChinese()}月{q_lunar.getDayInChinese()}</p>
+            <p style="font-size:1.2em;">农历 {q_lunar.getYearInGanZhi()}年 {q_lunar.getMonthInChinese()}月{q_lunar.getDayInChinese()}</p>
             <hr>
             <div style="display:flex; gap:40px;">
                 <div style="flex:1;"><strong style="color:#2e7d32; font-size:1.3em;">宜</strong><br>{'　'.join(yi)}</div>
