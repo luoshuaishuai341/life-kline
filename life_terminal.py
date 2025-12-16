@@ -131,16 +131,39 @@ class DestinyEngine:
         }
 
     def _calc_wuxing(self):
-        """基于真实八字统计五行强度"""
-        strength = {"金": 0, "木": 0, "水": 0, "火": 0, "土": 0}
-        # 天干权重2
-        for gan in [self.bazi.getYearGan(), self.bazi.getMonthGan(), self.bazi.getDayGan(), self.bazi.getTimeGan()]:
-            strength[self.bazi.getWuXing(gan)] += 2
-        # 地支权重1
-        for zhi in [self.bazi.getYearZhi(), self.bazi.getMonthZhi(), self.bazi.getDayZhi(), self.bazi.getTimeZhi()]:
-            strength[self.bazi.getWuXing(zhi)] += 1
-        total = sum(strength.values())
-        return {k: round(v / total * 100, 1) for k, v in strength.items()}
+            """基于真实八字统计五行强度（修复版）"""
+            strength = {"金": 0, "木": 0, "水": 0, "火": 0, "土": 0}
+            
+            # 定义天干地支对应的五行字典
+            wx_map = {
+                # 天干
+                "甲": "木", "乙": "木", 
+                "丙": "火", "丁": "火", 
+                "戊": "土", "己": "土", 
+                "庚": "金", "辛": "金", 
+                "壬": "水", "癸": "水",
+                # 地支
+                "寅": "木", "卯": "木", 
+                "巳": "火", "午": "火", 
+                "申": "金", "酉": "金", 
+                "亥": "水", "子": "水",
+                "辰": "土", "戌": "土", "丑": "土", "未": "土"
+            }
+
+            # 计算天干权重 (权重为2)
+            for gan in [self.bazi.getYearGan(), self.bazi.getMonthGan(), self.bazi.getDayGan(), self.bazi.getTimeGan()]:
+                if gan in wx_map:
+                    strength[wx_map[gan]] += 2
+            
+            # 计算地支权重 (权重为1)
+            for zhi in [self.bazi.getYearZhi(), self.bazi.getMonthZhi(), self.bazi.getDayZhi(), self.bazi.getTimeZhi()]:
+                if zhi in wx_map:
+                    strength[wx_map[zhi]] += 1
+            
+            # 计算百分比
+            total = sum(strength.values())
+            if total == 0: total = 1  # 防止除以0
+            return {k: round(v / total * 100, 1) for k, v in strength.items()}
 
     def generate_life_kline(self):
         """百年运势K线（优化波动曲线）"""
