@@ -16,7 +16,7 @@ from geopy.exc import GeocoderTimedOut, GeocoderUnavailable
 # 1. 页面配置与全中文炫酷样式
 # ==========================================
 st.set_page_config(
-    page_title="天机 · 全息命理终端 V19 终极版",
+    page_title="天机 · 全息命理终端 V20 终极版",
     page_icon="🌌",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -45,7 +45,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 数据加载
+# 2. 数据加载（支持三级到县）
 # ==========================================
 @st.cache_data
 def load_admin_data():
@@ -67,7 +67,7 @@ ADMIN_DATA = load_admin_data()
 # ==========================================
 @st.cache_data(show_spinner=False)
 def get_precise_location(addr):
-    ua = f"bazi_v19_{random.randint(10000,99999)}"
+    ua = f"bazi_v20_{random.randint(10000,99999)}"
     try:
         query = addr if any(k in addr for k in ["香港","澳门","台湾"]) else f"中国 {addr}"
         loc = Nominatim(user_agent=ua).geocode(query, timeout=10)
@@ -97,7 +97,7 @@ def call_ai_analysis(api_key, base_url, context):
         return f"⚠️ 网络异常: {str(e)}"
 
 # ==========================================
-# 4. 核心引擎（兼容所有 lunar_python 版本 + 河图洛书真实推演）
+# 4. 核心引擎（兼容 + 河图洛书）
 # ==========================================
 class DestinyEngine:
     def __init__(self, b_date: date, hour: int, minute: int, lat: float, lng: float, gender: str):
@@ -110,20 +110,17 @@ class DestinyEngine:
         self.lunar = self.solar.getLunar()
         self.bazi = self.lunar.getEightChar()
         
-        # 兼容所有版本的八字柱获取（使用 getYear() 等安全方法）
         self.year_pillar = self.bazi.getYear()
         self.month_pillar = self.bazi.getMonth()
         self.day_pillar = self.bazi.getDay()
         self.time_pillar = self.bazi.getTime()
         
-        # 种子基于真实八字柱字符串，确保每人不同
         self.seed = hash((self.year_pillar, self.month_pillar, self.day_pillar, self.time_pillar, hour, minute, lat, lng))
         random.seed(self.seed)
         np.random.seed(self.seed % (2**32))
         
         self.true_solar_diff = (lng - 120.0) * 4
         self.day_gan_num = self._gan_to_hetu(self.bazi.getDayGan())
-        self.day_zhi_num = self._zhi_to_num(self.bazi.getDayZhi())
         self.wuxing_strength = self._calc_wuxing()
         self.favored = self._get_favored()
         self.shen_sha = self._calc_shen_sha()
@@ -132,10 +129,6 @@ class DestinyEngine:
     def _gan_to_hetu(self, gan):
         map_gan = {"甲":6, "乙":1, "丙":9, "丁":4, "戊":5, "己":10, "庚":2, "辛":7, "壬":3, "癸":8}
         return map_gan.get(gan, 5)
-
-    def _zhi_to_num(self, zhi):
-        map_zhi = {"子":1,"丑":2,"寅":3,"卯":4,"辰":5,"巳":6,"午":7,"未":8,"申":9,"酉":10,"戌":11,"亥":12}
-        return map_zhi.get(zhi, 6)
 
     def _calc_wuxing(self):
         cnt = {"金":0, "木":0, "水":0, "火":0, "土":0}
@@ -237,7 +230,7 @@ class DestinyEngine:
         return f"性别:{self.gender}，出生:{self.birth_date} {self.hour}:{self.minute:02}，八字:{bazi_str}，日干河图数:{self.day_gan_num}，喜用神:{self.favored}，格局:{self.pattern[0]}，神煞:{shensha_names}"
 
 # ==========================================
-# 5. 主程序
+# 5. 主程序（地址精确到县 + 年份从1990开始）
 # ==========================================
 def main():
     with st.sidebar:
@@ -254,7 +247,8 @@ def main():
         
         st.markdown("#### 📅 出生时间")
         col_y, col_m, col_d = st.columns(3)
-        year = col_y.selectbox("年", range(1900, datetime.now().year + 1), index=70)
+        current_year = datetime.now().year
+        year = col_y.selectbox("年", range(1990, current_year + 1), index=current_year - 1990)  # 默认1990年开始，当前年高亮
         month = col_m.selectbox("月", range(1,13), format_func=lambda x: f"{x}月")
         day_max = (date(year, month+1, 1) - timedelta(days=1)).day if month < 12 else 31
         day = col_d.selectbox("日", range(1, day_max+1), format_func=lambda x: f"{x}日")
@@ -263,18 +257,32 @@ def main():
         hour = col_h.selectbox("时辰", range(24))
         minute = col_min.selectbox("分钟", range(60))
         
-        st.markdown("#### 📍 出生地点")
+        st.markdown("#### 📍 出生地点（精确到县）")
         full_addr = "北京市"
         if ADMIN_DATA:
             provs = [p['name'] for p in ADMIN_DATA]
-            prov = st.selectbox("省份", provs)
+            prov = st.selectbox("省份/直辖市", provs)
             prov_d = next(p for p in ADMIN_DATA if p['name']==prov)
+            
             cities = prov_d.get('children', [])
-            city = prov if prov in ["北京","上海","天津","重庆"] else st.selectbox("城市", [c['name'] for c in cities] or [prov])
-            detail = st.text_input("详细（如医院）", "协和医院")
-            full_addr = f"{prov}{city}{detail}"
+            if prov in ["北京市","上海市","天津市","重庆市"] and cities:
+                city_d = cities[0]
+                city = prov
+            else:
+                city_names = [c['name'] for c in cities] if cities else [prov]
+                city = st.selectbox("地级市", city_names)
+                city_d = next(c for c in cities if c['name']==city) if cities else prov_d
+            
+            # 精确到县/区
+            counties = city_d.get('children', [])
+            county_names = [c['name'] for c in counties] if counties else ["市辖区"]
+            county = st.selectbox("区/县", county_names)
+            
+            detail = st.text_input("详细地址（如乡镇、医院）", "人民医院")
+            full_addr = f"{prov}{city}{county}{detail}"
         else:
             st.warning("未加载区划数据，使用默认")
+            full_addr = st.text_input("手动输入完整地址", "北京市朝阳区")
         
         if st.button("🛰️ 精准定位 & 排盘", type="primary", use_container_width=True):
             with st.spinner("天机正在推演..."):
@@ -323,7 +331,7 @@ def main():
 
     with tab2:
         st.markdown("### 📅 流年每日运势")
-        q_year = st.slider("选择年份", 1900, 2100, datetime.now().year)
+        q_year = st.slider("选择年份", 1990, current_year + 10, current_year)
         df_daily = engine.generate_daily_kline(q_year)
         fig_d = go.Figure(go.Candlestick(x=df_daily['日期'], open=df_daily['开盘'], high=df_daily['最高'],
                                          low=df_daily['最低'], close=df_daily['收盘'],
