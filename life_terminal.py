@@ -7,41 +7,40 @@ from datetime import datetime, date, timedelta
 import random
 import json
 import os
+import requests  # 新增：用于调用外部AI
 from geopy.geocoders import Nominatim
-from geopy.exc import GeocoderTimedOut, GeocoderUnavailable, GeocoderServiceError
+from geopy.exc import GeocoderTimedOut, GeocoderUnavailable
 
 # ==========================================
 # 1. 页面配置与样式
 # ==========================================
 st.set_page_config(
-    page_title="天机 · 全息八字排盘系统 Ultimate",
-    page_icon="☯️",
+    page_title="天机 · AI 命理量化终端",
+    page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 st.markdown("""
 <style>
-    .stApp { background-color: #fcfcfc; color: #333; }
-    section[data-testid="stSidebar"] { background-color: #f0f2f6; border-right: 1px solid #e0e0e0; }
-    h1, h2, h3 { font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif; color: #8e24aa !important; }
+    .stApp { background-color: #f5f7f9; color: #333; }
+    h1, h2, h3 { font-family: 'PingFang SC', sans-serif; color: #2c3e50 !important; }
     
-    /* 仪表盘卡片样式 */
-    .metric-card {
-        background: white; border-radius: 10px; padding: 20px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.05); border: 1px solid #eee;
-        text-align: center; margin-bottom: 15px;
+    /* AI 分析框样式 */
+    .ai-box {
+        background-color: #ffffff; border-left: 5px solid #6c5ce7;
+        padding: 20px; border-radius: 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        margin-top: 20px; font-family: 'Microsoft YaHei', sans-serif;
     }
-    .metric-label { color: #666; font-size: 0.9em; margin-bottom: 5px; }
-    .metric-value { color: #8e24aa; font-size: 1.8em; font-weight: bold; }
     
-    .location-success { color: #155724; background-color: #d4edda; border: 1px solid #c3e6cb; padding: 10px; border-radius: 5px; }
-    .location-warning { color: #856404; background-color: #fff3cd; border: 1px solid #ffeeba; padding: 10px; border-radius: 5px; }
+    /* 熊市/牛市 标签 */
+    .trend-bull { color: #d32f2f; font-weight: bold; background: #ffebee; padding: 2px 5px; border-radius: 3px; }
+    .trend-bear { color: #2e7d32; font-weight: bold; background: #e8f5e9; padding: 2px 5px; border-radius: 3px; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 基础数据加载
+# 2. 基础组件 (数据加载 & 定位)
 # ==========================================
 @st.cache_data
 def load_admin_data():
@@ -51,350 +50,314 @@ def load_admin_data():
         p = os.path.join(curr, f)
         if os.path.exists(p):
             try:
-                with open(p, "r", encoding="utf-8") as file:
-                    return json.load(file), f
+                with open(p, "r", encoding="utf-8") as file: return json.load(file)
             except: continue
-    return None, None
+    return None
 
-ADMIN_DATA, _ = load_admin_data()
+ADMIN_DATA = load_admin_data()
 
-# ==========================================
-# 3. 定位服务 (修复 KeyError 核心)
-# ==========================================
 @st.cache_data(show_spinner=False)
 def get_precise_location(addr):
-    ua = f"life_kline_{random.randint(10000,99999)}"
-    # 默认坐标 (北京) - 用于降级
-    default_res = {"success": False, "lat": 39.9042, "lng": 116.4074, "msg": "定位失败，已使用默认坐标"}
+    ua = f"life_ai_{random.randint(10000,99999)}"
+    try:
+        loc = Nominatim(user_agent=ua).geocode(f"China {addr}" if "China" not in addr else addr, timeout=5)
+        if loc: return {"success": True, "lat": loc.latitude, "lng": loc.longitude, "addr": loc.address}
+    except: pass
+    return {"success": False, "lat": 39.90, "lng": 116.40, "msg": "定位失败，使用默认坐标"}
+
+# ==========================================
+# 3. 外部 AI 调用接口 (核心新增)
+# ==========================================
+def call_friend_ai(api_key, base_url, prompt):
+    """
+    通用接口：调用外部 AI (如 DeepSeek, ChatGPT, 或你朋友的本地模型)
+    """
+    if not api_key:
+        return mock_ai_analysis(prompt) # 如果没填Key，使用模拟分析
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "model": "gpt-3.5-turbo", # 这里可以让你朋友提供模型名称
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.7
+    }
     
     try:
-        geolocator = Nominatim(user_agent=ua)
-        loc = geolocator.geocode(f"China {addr}" if "China" not in addr else addr, timeout=8)
-        
-        if loc:
-            return {
-                "success": True, 
-                "lat": loc.latitude, 
-                "lng": loc.longitude, 
-                "address": loc.address
-            }
+        # 假设你朋友的接口兼容 OpenAI 格式
+        response = requests.post(f"{base_url}/chat/completions", headers=headers, json=data, timeout=10)
+        if response.status_code == 200:
+            return response.json()['choices'][0]['message']['content']
         else:
-            # 即使没找到，也要返回 lat/lng，防止 KeyError
-            return default_res
-            
-    except Exception as e: 
-        # 发生异常时，同样返回带 lat/lng 的默认值
-        default_res["msg"] = f"定位服务异常: {str(e)}"
-        return default_res
+            return f"⚠️ 连接朋友AI失败 (Code {response.status_code}): {response.text}"
+    except Exception as e:
+        return f"⚠️ 网络请求异常: {str(e)}"
+
+def mock_ai_analysis(context):
+    """本地规则模拟 AI (当用户没有 API Key 时使用)"""
+    import time
+    time.sleep(1.5) # 模拟思考时间
+    return f"""
+    【本地 AI 模拟分析】
+    根据命盘数据分析：
+    1. **格局判断**：{context[:50]}...
+    2. **大运走势**：检测到K线在30-40岁区间有剧烈波动，往往对应事业转折。
+    3. **建议**：这是本地模拟数据。如需真实分析，请在左侧填入 API Key 连接云端大脑。
+    """
 
 # ==========================================
-# 4. 核心命理引擎
+# 4. 命理引擎 (重构算法：引入大运盛衰)
 # ==========================================
 class DestinyEngine:
-    def __init__(self, b_date, h, m, s, lat, lng, gender):
+    def __init__(self, b_date, h, m, lat, lng, gender):
         self.birth_date = b_date
-        self.gender = gender 
-        self.solar = Solar.fromYmdHms(b_date.year, b_date.month, b_date.day, h, m, s)
+        self.gender = gender
+        self.solar = Solar.fromYmdHms(b_date.year, b_date.month, b_date.day, h, m, 0)
         self.lunar = self.solar.getLunar()
         self.bazi = self.lunar.getEightChar()
-        self.seed = hash((b_date, h, m, s, lat))
+        self.seed = hash((b_date, h, m, lat))
         
-        # 经度校正
-        self.true_solar_time_diff = (lng - 120.0) * 4
+        self.wuxing_strength = self._calc_wuxing()
+        self.favored = self._calc_favored() # 喜用神
+        
+    def _calc_wuxing(self):
+        # 简化版五行统计
+        cnt = {"金":0, "木":0, "水":0, "火":0, "土":0}
+        map_wx = {"甲":"木","乙":"木","丙":"火","丁":"火","戊":"土","己":"土","庚":"金","辛":"金","壬":"水","癸":"水",
+                  "寅":"木","卯":"木","巳":"火","午":"火","申":"金","酉":"金","亥":"水","子":"水","辰":"土","戌":"土","丑":"土","未":"土"}
+        for p in [self.bazi.getYearGan(), self.bazi.getYearZhi(), self.bazi.getMonthGan(), self.bazi.getMonthZhi(),
+                  self.bazi.getDayGan(), self.bazi.getDayZhi(), self.bazi.getTimeGan(), self.bazi.getTimeZhi()]:
+            if p in map_wx: cnt[map_wx[p]] += 1
+        return cnt
 
-        # 计算五行强弱
-        self.wuxing_strength = self._calc_wuxing_strength()
-        # 计算喜用神
-        self.favored_element = self._calc_favored_element()
-        # 计算本命卦
-        self.ming_gua = self._calc_ming_gua()
+    def _calc_favored(self):
+        # 简单逻辑：缺什么喜什么，或者抑制过强的
+        # 真实逻辑极复杂，这里用 simplified logic 保证演示效果
+        sorted_wx = sorted(self.wuxing_strength.items(), key=lambda x:x[1])
+        weakest = sorted_wx[0][0] # 最弱的作为喜神
+        return weakest
 
-    def _calc_wuxing_strength(self):
-        """计算五行分数"""
-        strength = {"金": 0, "木": 0, "水": 0, "火": 0, "土": 0}
-        wx_map = {
-            "甲":"木", "乙":"木", "寅":"木", "卯":"木",
-            "丙":"火", "丁":"火", "巳":"火", "午":"火",
-            "戊":"土", "己":"土", "辰":"土", "戌":"土", "丑":"土", "未":"土",
-            "庚":"金", "辛":"金", "申":"金", "酉":"金",
-            "壬":"水", "癸":"水", "亥":"水", "子":"水"
-        }
-        pillars = [
-            self.bazi.getYearGan(), self.bazi.getYearZhi(),
-            self.bazi.getMonthGan(), self.bazi.getMonthZhi(),
-            self.bazi.getDayGan(), self.bazi.getDayZhi(),
-            self.bazi.getTimeGan(), self.bazi.getTimeZhi()
-        ]
-        
-        for char in pillars:
-            if char in wx_map:
-                weight = 1.5 if char == self.bazi.getMonthZhi() else 1.0
-                strength[wx_map[char]] += weight
-        
-        total = sum(strength.values()) or 1
-        return {k: round(v/total*100, 1) for k,v in strength.items()}
+    def _get_dayun_wuxing(self, age):
+        """模拟十年大运的五行属性"""
+        # 每10年换一个大运五行
+        cycle = ["木", "火", "土", "金", "水"]
+        # 根据出生种子偏移
+        start_idx = self.seed % 5
+        idx = (start_idx + (age // 10)) % 5
+        return cycle[idx]
 
-    def _calc_favored_element(self):
-        """简单计算喜用神"""
-        day_master = self.bazi.getDayGan()
-        gan_wx = {"甲":"木", "乙":"木", "丙":"火", "丁":"火", "戊":"土", "己":"土", "庚":"金", "辛":"金", "壬":"水", "癸":"水"}
-        dm_wx = gan_wx.get(day_master, "木")
-        
-        sheng_ke_map = {"木":["水","木"], "火":["木","火"], "土":["火","土"], "金":["土","金"], "水":["金","水"]}
-        friends = sheng_ke_map.get(dm_wx, [])
-        friend_score = sum(self.wuxing_strength[wx] for wx in friends)
-        
-        is_strong = friend_score > 45 
-        
-        generate = {"木":"火", "火":"土", "土":"金", "金":"水", "水":"木"}
-        if is_strong:
-            return generate[dm_wx] 
-        else:
-            reverse_gen = {v:k for k,v in generate.items()}
-            return reverse_gen[dm_wx]
-
-    def _calc_ming_gua(self):
-        """计算本命卦"""
-        year = self.birth_date.year
-        digits_sum = sum(int(d) for d in str(year))
-        while digits_sum > 9: digits_sum = sum(int(d) for d in str(digits_sum))
-        
-        if self.gender == "男":
-            res = 11 - digits_sum
-        else:
-            res = 4 + digits_sum
-            
-        while res > 9: res -= 9
-        if res == 0: res = 9
-        if res == 5: res = 2 if self.gender == "男" else 8
-        
-        gua_map = {1:"坎水", 2:"坤土", 3:"震木", 4:"巽木", 6:"乾金", 7:"兑金", 8:"艮土", 9:"离火"}
-        return gua_map.get(res, "未知")
-
-    def _get_year_wuxing(self, year):
-        wuxing_cycle = ["金", "水", "木", "火", "土"]
-        return wuxing_cycle[year % 5]
-
-    def generate_optimized_life_kline(self):
-        """五行生克生成人生K线"""
+    def generate_realistic_kline(self):
+        """
+        [核心重构] 生成真实起伏的K线
+        逻辑：大运五行 vs 喜用神
+        """
         data = []
-        price = 100.0
-        favored = self.favored_element 
+        price = 100.0 # 初始人生资本
+        favored = self.favored
         
-        generate = {"木":"火", "火":"土", "土":"金", "金":"水", "水":"木"} 
+        # 生克关系
+        # key 生 value
+        generate = {"木":"火", "火":"土", "土":"金", "金":"水", "水":"木"}
+        # key 克 value
         overcome = {"木":"土", "土":"水", "水":"火", "火":"金", "金":"木"}
         
         random.seed(self.seed)
         
         for age in range(101):
             year = self.birth_date.year + age
-            current_year_wx = self._get_year_wuxing(year)
             
-            change_pct = 0
+            # 1. 获取当前大运 (10年一个基调)
+            dayun = self._get_dayun_wuxing(age)
+            
+            # 2. 获取流年 (1年一个波动)
+            liunian_idx = (year - 4) % 10 
+            liunian_map = ["木","木","火","火","土","土","金","金","水","水"]
+            liunian = liunian_map[liunian_idx]
+            
+            # 3. 计算趋势分 (Trend Score)
+            trend = 0
             reason = ""
             
-            if current_year_wx == favored:
-                change_pct = 4.0 
-                reason = f"流年{current_year_wx} 助旺喜用神"
-            elif generate[current_year_wx] == favored:
-                change_pct = 6.0 
-                reason = f"流年{current_year_wx} 生扶喜用神"
-            elif generate[favored] == current_year_wx:
-                change_pct = 1.0 
-                reason = f"喜用生流年"
-            elif overcome[current_year_wx] == favored:
-                change_pct = -5.0 
-                reason = f"流年{current_year_wx} 克制喜用神"
-            elif overcome[favored] == current_year_wx:
-                change_pct = 2.0 
-                reason = f"喜用克流年"
+            # --- 大运决定长期趋势 ---
+            if dayun == favored:
+                trend += 3.0 # 大运助我 -> 牛市基础
+                base_status = "大运得势"
+            elif generate.get(dayun) == favored:
+                trend += 2.0 # 大运生我 -> 慢牛
+                base_status = "贵人相助"
+            elif overcome.get(dayun) == favored:
+                trend -= 3.0 # 大运克喜神 -> 熊市基础 (关键！这会导致下跌)
+                base_status = "大运受阻"
+            elif overcome.get(favored) == dayun:
+                trend -= 1.0 # 喜神克大运 -> 辛苦
+                base_status = "劳碌奔波"
+            else:
+                trend -= 0.5 # 消耗
+                base_status = "平庸过渡"
+
+            # --- 流年决定短期波动 ---
+            if liunian == favored:
+                trend += 3.0 # 流年给力
+                reason = f"{base_status} + 流年{liunian}生旺"
+            elif overcome.get(liunian) == favored:
+                trend -= 4.0 # 流年破局 (关键！暴跌来源)
+                reason = f"{base_status} + 流年{liunian}克破"
+            else:
+                reason = f"{base_status} + 流年{liunian}平稳"
+
+            # 4. 随机扰动 (黑天鹅事件)
+            noise = random.normalvariate(0, 2.0)
             
-            noise = random.normalvariate(0, 1.5)
-            final_change = change_pct + noise
+            # 5. 计算最终涨跌
+            change = trend + noise
             
-            if age > 0 and age % 12 == 0:
-                final_change -= 4
-                reason = "本命年值太岁"
-                
-            close = max(30, price + final_change)
+            # 6. 价格迭代 (允许跌破开盘价)
+            close = price + change
             
-            if final_change > 4: status = "大吉"
-            elif final_change > 1: status = "上升"
-            elif final_change > -2: status = "平稳"
-            else: status = "调整"
+            # 确保不会归零，最低保留10分
+            close = max(10, close)
             
+            # 记录 K线
             data.append({
                 "Age": age, "Year": year,
                 "Open": price, "Close": close,
-                "High": close + abs(final_change)*0.6,
-                "Low": price - abs(final_change)*0.6,
-                "Status": status,
-                "Reason": reason
+                "High": max(price, close) + abs(change), # 震荡
+                "Low": min(price, close) - abs(change),
+                "Status": "📈 牛市" if change > 0 else "📉 熊市",
+                "Reason": reason,
+                "Dayun": dayun,
+                "Liunian": liunian
             })
+            
             price = close
             
-        df = pd.DataFrame(data)
-        df['MA10'] = df['Close'].rolling(10).mean()
-        return df
+        return pd.DataFrame(data)
 
-    def get_basic_info(self):
-        return {
-            "bazi_text": f"{self.bazi.getYearGan()}{self.bazi.getYearZhi()} {self.bazi.getMonthGan()}{self.bazi.getMonthZhi()} {self.bazi.getDayGan()}{self.bazi.getDayZhi()} {self.bazi.getTimeGan()}{self.bazi.getTimeZhi()}",
-            "day_master": self.bazi.getDayGan(),
-            "wuxing": self.wuxing_strength,
-            "favored": self.favored_element,
-            "ming_gua": self.ming_gua,
-            "age": datetime.now().year - self.birth_date.year + 1,
-            "nongli": f"{self.lunar.getYearInGanZhi()}年 {self.lunar.getMonthInChinese()}月{self.lunar.getDayInChinese()}",
-            "shengxiao": self.lunar.getYearShengXiao(),
-            "solar_diff": f"{self.true_solar_time_diff:.1f}min"
-        }
+    def get_prompt_context(self):
+        """生成给 AI 读的提示词上下文"""
+        df = self.generate_realistic_kline()
+        # 提取关键转折点 (最低点和最高点)
+        min_row = df.loc[df['Close'].idxmin()]
+        max_row = df.loc[df['Close'].idxmax()]
+        
+        return f"""
+        用户八字：{self.bazi.getYearGan()}{self.bazi.getYearZhi()}...
+        喜用神：{self.favored}
+        五行分布：{self.wuxing_strength}
+        
+        K线数据摘要：
+        - 最低谷：{min_row['Age']}岁，原因：{min_row['Reason']}
+        - 最高峰：{max_row['Age']}岁，原因：{max_row['Reason']}
+        - 当前趋势（{datetime.now().year - self.birth_date.year}岁）：{df.iloc[datetime.now().year - self.birth_date.year]['Status']}
+        
+        请根据以上数据，用算命师结合金融分析师的口吻，点评该用户的一生财运趋势，并给出3条具体建议。
+        """
 
 # ==========================================
-# 5. 主程序逻辑
+# 5. 主程序
 # ==========================================
 def main():
+    # --- 侧边栏配置 ---
     with st.sidebar:
-        st.header("📂 缘主信息")
+        st.header("⚙️ 终端设置")
+        
+        with st.expander("🤖 AI 接口设置 (连接朋友AI)", expanded=True):
+            st.caption("留空则使用本地模拟分析")
+            api_base = st.text_input("Base URL", "https://api.openai.com/v1")
+            api_key = st.text_input("API Key", type="password")
+        
+        st.markdown("---")
+        st.header("📂 档案录入")
         name = st.text_input("姓名", "某君")
         gender = st.selectbox("性别", ["男", "女"])
         
-        st.markdown("#### 📅 出生信息")
+        # 日期选择
         c1, c2, c3 = st.columns([1.2, 1, 1])
-        curr_year = datetime.now().year
-        y = c1.selectbox("年", range(1930, curr_year + 1), index=60)
+        y = c1.selectbox("年", range(1950, 2026), index=40)
         m = c2.selectbox("月", range(1, 13), format_func=lambda x:f"{x}月")
+        d = c3.selectbox("日", range(1, 32))
         
-        # 动态计算天数
-        if m in [1, 3, 5, 7, 8, 10, 12]: max_d = 31
-        elif m in [4, 6, 9, 11]: max_d = 30
-        else: max_d = 29 if (y%4==0 and (y%100!=0 or y%400==0)) else 28
-        
-        d = c3.selectbox("日", range(1, max_d + 1), format_func=lambda x:f"{x}日")
-        
+        # 时间选择
         t1, t2 = st.columns(2)
         hh = t1.selectbox("时", range(24), index=12)
         mm = t2.selectbox("分", range(60))
         
-        st.markdown("#### 📍 地点定位")
-        provs = [p['name'] for p in ADMIN_DATA] if ADMIN_DATA else ["北京市"]
-        prov = st.selectbox("省份", provs)
+        # 定位
+        prov = st.selectbox("省份", ["北京市","上海市","广东省","浙江省","江苏省","四川省","其他"])
         detail = st.text_input("详细地址", "市辖区")
         
-        if st.button("🛰️ 排盘", type="primary", use_container_width=True):
-            with st.spinner("正在测算天机..."):
-                res = get_precise_location(f"{prov}{detail}")
-                st.session_state.loc = res
-    
-    # 修复 KeyError：安全获取 lat/lng，如果不存在则使用默认值
-    loc_state = st.session_state.get('loc', {})
-    
-    # 无论定位是否成功，这里都必须保证有值，否则 DestinyEngine 初始化会崩
-    final_lat = loc_state.get('lat', 39.9042)
-    final_lng = loc_state.get('lng', 116.4074)
-    loc_msg = loc_state.get('msg', '等待定位')
-    loc_success = loc_state.get('success', False)
+        if st.button("🛰️ 重新定位"):
+            res = get_precise_location(f"{prov}{detail}")
+            st.session_state.loc = res
 
-    # 显示定位状态提示
-    if loc_success:
-        st.sidebar.markdown(f"<div class='location-success'>✅ {loc_state.get('address', '定位成功')}</div>", unsafe_allow_html=True)
-    elif "失败" in loc_msg or "异常" in loc_msg:
-         st.sidebar.markdown(f"<div class='location-warning'>⚠️ {loc_msg}</div>", unsafe_allow_html=True)
-    
-    # 实例化引擎
+    # 引擎初始化
+    loc = st.session_state.get('loc', {'lat':39.9, 'lng':116.4})
     b_date = date(y, m, d)
-    # 这里传入的是安全的 final_lat/final_lng，绝对不会报错
-    engine = DestinyEngine(b_date, hh, mm, 0, final_lat, final_lng, gender)
-    info = engine.get_basic_info()
+    engine = DestinyEngine(b_date, hh, mm, loc['lat'], loc['lng'], gender)
     
-    # 页面标题
-    st.title(f"🔮 天机命盘: {name}")
+    # 标题区
+    st.title(f"🔮 命运量化终端: {name}")
+    st.caption("Life Destiny Quantitative Terminal (Powered by AI)")
     
-    # 顶部状态栏
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("八字", info['bazi_text'])
-    c2.metric("本命卦", info['ming_gua'])
-    c3.metric("喜用神", f"喜 {info['favored']}")
-    c4.metric("真太阳时差", info['solar_diff'])
-    st.divider()
-
-    # --- 核心：命盘总览 Dashboard ---
+    # --- 模块 1: 真实的 K 线 (Real K-Line) ---
+    st.subheader("📉 人生大势 K 线 (真实起伏版)")
     
-    # 左侧：K线大势
-    st.subheader("📈 人生大势走势 (五行生克推演)")
-    
-    df_life = engine.generate_optimized_life_kline()
-    curr_age = info['age']
+    df_life = engine.generate_realistic_kline()
+    curr_age = datetime.now().year - y
     
     fig = go.Figure()
     
-    # K线
+    # K线绘制
     fig.add_trace(go.Candlestick(
         x=df_life['Age'], open=df_life['Open'], high=df_life['High'], low=df_life['Low'], close=df_life['Close'],
-        increasing_line_color='#8e24aa', decreasing_line_color='#2e7d32', 
+        increasing_line_color='#ef5350', decreasing_line_color='#26a69a', # 经典红涨绿跌
         name='运势',
-        text=df_life['Reason'], 
+        text=df_life['Reason'],
         hovertemplate=(
-            "<b>%{x}岁 (%{text})</b><br>"
-            "开盘: %{open:.1f}<br>"
-            "收盘: %{close:.1f}<br>"
-            "状态: %{text}<br>" 
+            "<b>%{x}岁</b><br>"
+            "收盘指数: %{close:.1f}<br>"
+            "因素: %{text}<br>"
             "<extra></extra>"
         )
     ))
-    # 均线
-    fig.add_trace(go.Scatter(x=df_life['Age'], y=df_life['MA10'], line=dict(color='#ffb300', width=2), name='十年大运'))
     
     fig.update_layout(
-        height=450, template="plotly_white", xaxis_rangeslider_visible=False,
-        title=dict(text=f"喜用神 [{info['favored']}] 生克流年推演图", x=0.5),
+        height=500, template="plotly_white", xaxis_rangeslider_visible=False,
+        title=dict(text="大运流年双重演算图", x=0.5),
         hovermode="x unified"
     )
     # 标记当前
-    fig.add_vline(x=curr_age, line_dash="dash", line_color="black")
+    fig.add_vline(x=curr_age, line_dash="dash", line_color="blue", annotation_text="You")
     st.plotly_chart(fig, use_container_width=True)
-    
-    # 下方：五行八卦详情
-    c_left, c_right = st.columns([1, 1])
-    
-    with c_left:
-        st.subheader("⚡ 五行强弱分布")
-        w = info['wuxing']
-        
-        w1, w2, w3, w4, w5 = st.columns(5)
-        w1.markdown(f"<div class='metric-card'><div class='metric-label'>金</div><div class='metric-value'>{w['金']}%</div></div>", unsafe_allow_html=True)
-        w2.markdown(f"<div class='metric-card'><div class='metric-label'>木</div><div class='metric-value'>{w['木']}%</div></div>", unsafe_allow_html=True)
-        w3.markdown(f"<div class='metric-card'><div class='metric-label'>水</div><div class='metric-value'>{w['水']}%</div></div>", unsafe_allow_html=True)
-        w4.markdown(f"<div class='metric-card'><div class='metric-label'>火</div><div class='metric-value'>{w['火']}%</div></div>", unsafe_allow_html=True)
-        w5.markdown(f"<div class='metric-card'><div class='metric-label'>土</div><div class='metric-value'>{w['土']}%</div></div>", unsafe_allow_html=True)
-        
-        # 雷达图
-        vals = list(w.values())
-        cats = list(w.keys())
-        fig_r = go.Figure(go.Scatterpolar(r=vals+[vals[0]], theta=cats+[cats[0]], fill='toself', line_color='#8e24aa'))
-        fig_r.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), height=300, margin=dict(t=20,b=20))
-        st.plotly_chart(fig_r, use_container_width=True)
 
-    with c_right:
-        st.subheader("☯️ 八卦命理解析")
-        
-        gua_img_map = {
-            "乾金": "☰", "兑金": "☱", "离火": "☲", "震木": "☳", 
-            "巽木": "☴", "坎水": "☵", "艮土": "☶", "坤土": "☷"
-        }
-        gua_icon = gua_img_map.get(info['ming_gua'], "☯️")
-        
-        st.markdown(f"""
-        <div style="background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%); color: white; padding: 30px; border-radius: 15px; text-align: center;">
-            <h1 style="color:white; font-size: 80px; margin: 0;">{gua_icon}</h1>
-            <h2 style="color:white; margin: 10px 0;">{info['ming_gua']} 命</h2>
-            <p style="opacity: 0.8;">东四命 / 西四命 自动推演</p>
-        </div>
-        <br>
-        """, unsafe_allow_html=True)
-        
-        st.info(f"**五行喜忌建议**：\n\n您的八字喜 **{info['favored']}**。建议多穿戴对应颜色的服饰，或往对应方位发展。\n\n"
-                f"例如：喜火者宜穿红，往南方发展；喜水者宜穿黑，往北方发展。")
+    # --- 模块 2: AI 深度分析 (AI Analysis) ---
+    st.markdown("---")
+    st.subheader("🤖 AI 命理分析师")
+    
+    col_ai_btn, col_ai_status = st.columns([1, 4])
+    with col_ai_btn:
+        analyze_btn = st.button("⚡ 呼叫 AI 解读 K 线", type="primary")
+    
+    if analyze_btn:
+        with st.spinner("正在连接 AI 大脑分析您的 K 线形态..."):
+            # 1. 准备数据上下文
+            context = engine.get_prompt_context()
+            
+            # 2. 调用外部接口 (或本地模拟)
+            ai_reply = call_friend_ai(api_key, api_base, context)
+            
+            # 3. 显示结果
+            st.markdown(f"""
+            <div class="ai-box">
+                <h4>📊 深度分析报告</h4>
+                {ai_reply}
+            </div>
+            """, unsafe_allow_html=True)
+            
+    else:
+        st.info("👆 点击上方按钮，让 AI 根据您的 K 线数据生成详细的运势研报。")
 
 if __name__ == "__main__":
     main()
