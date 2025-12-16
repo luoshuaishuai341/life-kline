@@ -1,382 +1,233 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-from lunar_python import Solar, Lunar, LunarYear
-from datetime import datetime, time, timedelta
+import datetime
 import random
-from geopy.geocoders import Nominatim # 新增：用于地址转经纬度
+import plotly.graph_objects as go
+import plotly.express as px
 
-# ==========================================
-# 1. 界面配置与 CSS (极简白主题)
-# ==========================================
+# 设置页面配置
+st.set_page_config(page_title="高阶八字运势分析系统", layout="wide", page_icon="☯️")
 
-st.set_page_config(
-    page_title="人生K线 | 运势管理系统",
-    page_icon="🏮",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# 注入 CSS：白底黑字，现代简约风格
-st.markdown("""
-<style>
-    /* 全局背景设为纯白 */
-    .stApp {
-        background-color: #f8f9fa;
-        color: #333333;
-    }
-    
-    /* 侧边栏背景 - 浅灰 */
-    section[data-testid="stSidebar"] {
-        background-color: #ffffff;
-        border-right: 1px solid #e0e0e0;
-    }
-    
-    /* 字体优化 */
-    * {
-        font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif !important;
-    }
-    
-    /* 标题颜色 */
-    h1, h2, h3 {
-        color: #1a1a1a !important;
-        font-weight: 700 !important;
-    }
-    
-    /* 关键指标卡片优化 */
-    div[data-testid="stMetricValue"] {
-        font-size: 24px;
-        color: #d32f2f; /* 中国红 */
-        font-weight: bold;
-    }
-    div[data-testid="stMetricLabel"] {
-        color: #666;
-        font-size: 14px;
-    }
-    
-    /* 按钮自定义 - 红色系 */
-    button[kind="primary"] {
-        background-color: #d32f2f;
-        color: white;
-        border: none;
-        border-radius: 4px;
-    }
-    button[kind="secondary"] {
-        border: 1px solid #d32f2f;
-        color: #d32f2f;
-        background-color: white;
-    }
-    
-    /* 输入框优化 */
-    .stTextInput input, .stDateInput input, .stTimeInput input {
-        background-color: #ffffff;
-        color: #333;
-        border: 1px solid #ddd;
-    }
-    
-    /* 去除顶部留白 */
-    .block-container {
-        padding-top: 2rem;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# ==========================================
-# 2. 核心逻辑工具函数
-# ==========================================
-
-def get_location_longitude(address):
-    """
-    输入地址，返回经度。
-    如果解析失败，默认返回北京经度 (116.4)
-    """
-    try:
-        geolocator = Nominatim(user_agent="life_kline_app_v3")
-        location = geolocator.geocode(address)
-        if location:
-            return location.longitude, f"已定位: {address}"
-        else:
-            return 116.4, "地址未找到，使用默认经度"
-    except:
-        return 116.4, "定位服务连接超时，使用默认经度"
-
-class DestinyQuantEngine:
-    """
-    人生量化引擎：负责排盘、生成K线数据、计算技术指标。
-    """
-    def __init__(self, birth_date, birth_time, gender, longitude):
-        self.birth_date = birth_date
-        self.gender = gender
-        
-        # 1. 八字排盘
-        self.solar = Solar.fromYmdHms(
-            birth_date.year, birth_date.month, birth_date.day,
-            birth_time.hour, birth_time.minute, 0
-        )
-        self.lunar = self.solar.getLunar()
-        self.ba_zi = self.lunar.getEightChar()
-        
-        # 2. 锁定随机种子
-        seed_val = int(birth_date.strftime("%Y%m%d")) + birth_time.hour + birth_time.minute
-        random.seed(seed_val)
-        np.random.seed(seed_val)
-
-    def get_profile(self):
-        """获取基础信息"""
-        return {
-            "code": f"{self.ba_zi.getDayGan()}{self.ba_zi.getDayZhi()}", # 日柱
-            "wuxing": self.ba_zi.getDayWuXing(), # 日主五行
-            "animal": self.lunar.getYearShengXiao(),
-            "year_zhu": f"{self.ba_zi.getYearGan()}{self.ba_zi.getYearZhi()}",
-            "month_zhu": f"{self.ba_zi.getMonthGan()}{self.ba_zi.getMonthZhi()}",
+# --- 1. 模拟地理数据与经纬度 (实际开发中建议对接高德/百度地图API) ---
+# 这是一个简化的四级联动数据结构
+CHINA_LOCATIONS = {
+    "北京市": {
+        "coords": [116.4074, 39.9042],
+        "children": {
+            "朝阳区": {
+                "coords": [116.4431, 39.9215],
+                "hospitals": ["朝阳医院", "中日友好医院", "首都儿科研究所"]
+            },
+            "海淀区": {
+                "coords": [116.2981, 39.9593],
+                "hospitals": ["北医三院", "海淀医院", "西苑医院"]
+            }
         }
-    
-    def get_daily_fortune(self):
-        """获取今日实时运势 (基于 Lunar 库)"""
-        now = datetime.now()
-        today_solar = Solar.fromYmdHms(now.year, now.month, now.day, now.hour, now.minute, 0)
-        today_lunar = today_solar.getLunar()
-        
-        return {
-            "date_str": f"{now.year}年{now.month}月{now.day}日",
-            "lunar_str": f"农历{today_lunar.getMonthInChinese()}月{today_lunar.getDayInChinese()}",
-            "yi": " ".join(today_lunar.getDayYi()), # 宜
-            "ji": " ".join(today_lunar.getDayJi()), # 忌
-            "chong": f"冲{today_lunar.getDayChongDesc()}", # 冲煞
-            "lucky_god": f"{today_lunar.getPositionXiDesc()}", # 喜神方位
-            "wealth_god": f"{today_lunar.getPositionCaiDesc()}"  # 财神方位
+    },
+    "上海市": {
+        "coords": [121.4737, 31.2304],
+        "children": {
+            "浦东新区": {
+                "coords": [121.5447, 31.2225],
+                "hospitals": ["东方医院", "仁济医院东院", "曙光医院"]
+            },
+            "黄浦区": {
+                "coords": [121.4844, 31.2317],
+                "hospitals": ["瑞金医院", "长征医院", "第九人民医院"]
+            }
         }
+    }
+}
 
-    def generate_market_data(self, start_age=0, end_age=100):
-        """生成人生K线数据"""
-        data = []
-        price = 100.0
-        
-        for age in range(start_age, end_age + 1):
-            year = self.birth_date.year + age
-            
-            # --- 模拟算法 (此处可替换为真实八字喜忌逻辑) ---
-            # 基础波动
-            change = np.random.normal(0, 3.0) 
-            
-            # 大运周期 (10年一运)
-            cycle_idx = age // 10
-            cycle_trend = np.sin(cycle_idx) * 2.8 
-            change += cycle_trend
-            
-            # 特殊年份 (本命年、刑冲破害模拟)
-            if age % 12 == 0: 
-                change -= 3 # 本命年压力
-            
-            # 计算 OHLC
-            close_price = max(10, price + change)
-            open_price = price
-            high_price = max(open_price, close_price) + abs(np.random.normal(0, 1.5))
-            low_price = min(open_price, close_price) - abs(np.random.normal(0, 1.5))
-            
-            data.append({
-                "Year": year,
-                "Age": age,
-                "Open": open_price,
-                "High": high_price,
-                "Low": low_price,
-                "Close": close_price,
-            })
-            price = close_price
+# --- 2. 核心计算函数 (模拟) ---
 
-        return pd.DataFrame(data)
+def calculate_lat_lon(province, city, district, specific_place):
+    """
+    根据选择的地点计算经纬度。
+    在真实场景中，这里应该调用地图API。
+    这里使用基准坐标 + 随机微小偏移来模拟具体地点的精度。
+    """
+    base_coords = CHINA_LOCATIONS.get(province, {}).get("children", {}).get(district, {}).get("coords", [116.0, 39.0])
+    
+    # 模拟不同医院/地点的微小经纬度差异
+    offset_val = sum(ord(c) for c in specific_place) % 100 * 0.0001 if specific_place else 0
+    real_lon = base_coords[0] + offset_val
+    real_lat = base_coords[1] + offset_val
+    
+    return real_lon, real_lat
 
-    @staticmethod
-    def calculate_indicators(df):
-        df['MA10'] = df['Close'].rolling(window=10).mean() # 10年大运
-        return df
+def generate_daily_fortune(birth_date, target_year):
+    """
+    生成指定年份每一天的运势数据
+    """
+    start_date = datetime.date(target_year, 1, 1)
+    end_date = datetime.date(target_year, 12, 31)
+    delta = end_date - start_date
+    
+    data = []
+    # 使用出生日期作为种子，保证同一个人看到的运势是固定的
+    seed_base = int(birth_date.strftime("%Y%m%d"))
+    
+    for i in range(delta.days + 1):
+        curr_date = start_date + datetime.timedelta(days=i)
+        day_seed = seed_base + int(curr_date.strftime("%Y%m%d"))
+        random.seed(day_seed)
+        
+        # 模拟 K线数据 (开盘, 最高, 最低, 收盘) - 这里指运势分数的波动
+        open_score = random.randint(50, 80)
+        close_score = open_score + random.randint(-10, 15)
+        high_score = max(open_score, close_score) + random.randint(0, 5)
+        low_score = min(open_score, close_score) - random.randint(0, 5)
+        
+        # 限制在0-100之间
+        high_score = min(100, high_score)
+        low_score = max(0, low_score)
+        
+        desc = "大吉" if close_score > 85 else ("平运" if close_score > 60 else "需谨慎")
+        
+        data.append({
+            "日期": curr_date,
+            "开盘": open_score,
+            "收盘": close_score,
+            "最高": high_score,
+            "最低": low_score,
+            "运势描述": desc
+        })
+    return pd.DataFrame(data)
 
-# ==========================================
-# 3. 前端逻辑
-# ==========================================
+# --- 3. 页面 UI 布局 ---
 
-def main():
-    # --- 侧边栏：信息录入 ---
-    with st.sidebar:
-        st.header("📝 缘主信息录入")
-        st.markdown("---")
-        
-        input_name = st.text_input("姓名", "某君")
-        input_gender = st.radio("性别", ["男", "女"], horizontal=True)
-        
-        # 优化：地址输入转经纬度
-        st.markdown("###### 出生地信息")
-        input_address = st.text_input("出生城市/地址 (自动获取经度)", "北京市东城区")
-        
-        # 经度处理逻辑
-        calc_longitude = 116.4 # 默认
-        if input_address:
-            # 实际调用时，可以加一个按钮避免频繁请求，或者直接计算
-            # 这里为了流畅体验，我们假设用户输完地址后点击生成按钮才计算
-            pass
-            
-        input_date = st.date_input("出生日期 (公历)", datetime(1995, 8, 18))
-        input_time = st.time_input("出生时间", time(8, 30))
-        
-        st.markdown("---")
-        generate_btn = st.button("✨ 开启人生排盘", type="primary", use_container_width=True)
-        
-        st.caption("版本: v3.1 | 仅供娱乐参考")
+st.title("🌌 全息八字运势分析系统 v2.0")
+st.markdown("---")
 
-    # --- 主界面 ---
-    if generate_btn:
-        # 1. 获取经纬度
-        with st.spinner('正在定位出生地磁场...'):
-            lng, loc_msg = get_location_longitude(input_address)
-        st.toast(loc_msg, icon="📍")
-
-        # 2. 实例化引擎
-        engine = DestinyQuantEngine(input_date, input_time, input_gender, lng)
-        profile = engine.get_profile()
-        daily_fortune = engine.get_daily_fortune()
-        df = engine.generate_market_data()
-        df = engine.calculate_indicators(df)
-        
-        # 计算当前岁数
-        current_year = datetime.now().year
-        current_age = current_year - input_date.year
-        
-        # 获取当年数据
-        try:
-            curr_row = df[df['Year'] == current_year].iloc[0]
-            trend_val = curr_row['Close'] - curr_row['Open']
-        except:
-            curr_row = df.iloc[-1]
-            trend_val = 0
-
-        # --- 模块1: 个人命盘概览 ---
-        st.markdown(f"## 🏮 命盘分析: {input_name}")
-        
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("日主 (元神)", profile['wuxing'], f"日柱: {profile['code']}")
-        c2.metric("当前运势分", f"{curr_row['Close']:.0f}", f"{trend_val:+.1f}", delta_color="normal") # normal会自动红涨绿跌
-        c3.metric("当前岁数", f"{current_age} 岁", "虚岁 +1")
-        c4.metric("生肖", profile['animal'], f"{profile['year_zhu']}年")
-        
-        st.divider()
-
-        # --- 模块2: 每日实时运势 (新功能) ---
-        st.markdown("### 📅 今日运势播报")
-        
-        # 使用卡片样式展示今日宜忌
-        day_col1, day_col2 = st.columns([1, 2])
-        
-        with day_col1:
-            st.info(f"""
-            **{daily_fortune['date_str']}** {daily_fortune['lunar_str']}
-            
-            **财神方位**: {daily_fortune['wealth_god']}  
-            **喜神方位**: {daily_fortune['lucky_god']}
-            """)
-            
-        with day_col2:
-            yi_ji_html = f"""
-            <div style="display: flex; gap: 20px;">
-                <div style="background-color: #fff3cd; padding: 15px; border-radius: 8px; flex: 1; border-left: 5px solid #ffc107;">
-                    <h4 style="margin:0; color: #856404;">🌞 宜 (Yi)</h4>
-                    <p style="margin-top:5px; color: #856404;">{daily_fortune['yi']}</p>
-                </div>
-                <div style="background-color: #f8d7da; padding: 15px; border-radius: 8px; flex: 1; border-left: 5px solid #dc3545;">
-                    <h4 style="margin:0; color: #721c24;">🚫 忌 (Ji)</h4>
-                    <p style="margin-top:5px; color: #721c24;">{daily_fortune['ji']}</p>
-                </div>
-            </div>
-            """
-            st.markdown(yi_ji_html, unsafe_allow_html=True)
-            
-        st.divider()
-
-        # --- 模块3: 人生K线图 ---
-        st.markdown("### 📈 人生 K 线推演 (百年大运)")
-        
-        fig = make_subplots(rows=1, cols=1)
-
-        # K线图 (中国红绿: 涨红跌绿)
-        fig.add_trace(go.Candlestick(
-            x=df['Age'], # X轴改为年龄，更直观
-            open=df['Open'], high=df['High'],
-            low=df['Low'], close=df['Close'],
-            name='年运',
-            increasing_line_color='#d32f2f', # 红涨
-            decreasing_line_color='#00796b'  # 绿跌
-        ))
-
-        # 均线
-        fig.add_trace(go.Scatter(
-            x=df['Age'], y=df['MA10'],
-            mode='lines',
-            line=dict(color='#FFD700', width=2),
-            name='十年大运线'
-        ))
-        
-        # 布局优化
-        fig.update_layout(
-            template="simple_white", # 更改为白底模板
-            xaxis_title="年龄 (岁)",
-            yaxis_title="运势指数",
-            xaxis_rangeslider_visible=False,
-            height=500,
-            hovermode="x unified",
-            margin=dict(t=20, b=20, l=40, r=40)
-        )
-        
-        # 标记当前年龄
-        fig.add_vline(x=current_age, line_width=1, line_dash="dash", line_color="#333")
-        fig.add_annotation(x=current_age, y=curr_row['High'], text="当前位置", showarrow=True, arrowhead=1)
-
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # 在图表下方显示当前输入的岁数
-        st.caption(f"📍 当前推演对象年龄: **{current_age} 岁** (出生于 {input_date.year} 年)")
-        
-        st.divider()
-
-        # --- 模块4: 详细运势解读 ---
-        st.markdown("### 📜 命理师批注")
-        
-        # 逻辑判断生成中文文案
-        trend_status = "大吉" if curr_row['Close'] > curr_row['MA10'] else "平稳"
-        if curr_row['Close'] < curr_row['MA10'] and curr_row['Close'] < curr_row['Open']:
-            trend_status = "需谨慎"
-            
-        advice_text = ""
-        if trend_status == "大吉":
-            advice_text = "当前运势强于大运基准，且处于上升通道。适合大胆进取，投资、创业或求职皆有良机。红鸾星动，人际关系顺畅。"
-        elif trend_status == "需谨慎":
-            advice_text = "运势出现回调，且低于十年平均线。建议韬光养晦，保守理财，注意身体健康，避免口舌之争。"
-        else:
-            advice_text = "运势平稳，无大起大落。适合积累沉淀，学习新技能，为下一轮爆发做准备。"
-
-        st.markdown(f"""
-        <div style="background-color: #f0f2f6; padding: 20px; border-radius: 10px;">
-            <p><strong>【总体评价】</strong>：<span style="color: #d32f2f; font-weight: bold;">{trend_status}</span></p>
-            <p><strong>【大师建议】</strong>：{advice_text}</p>
-            <p style="font-size: 0.9em; color: #666; margin-top: 10px;">*注：人生运势起伏乃常态，K线仅供参考，命运掌握在自己手中。</p>
-        </div>
-        """, unsafe_allow_html=True)
-
+# === 左侧边栏：信息输入 ===
+with st.sidebar:
+    st.header("1. 个人信息录入")
+    
+    # --- 出生日期 (中文显示) ---
+    birth_date = st.date_input(
+        "选择出生日期",
+        min_value=datetime.date(1900, 1, 1),
+        max_value=datetime.date.today(),
+        value=datetime.date(1990, 1, 1),
+        format="YYYY/MM/DD" # 显示格式
+    )
+    
+    birth_time = st.time_input("选择出生时间", datetime.time(12, 00))
+    
+    # --- 级联地址选择 ---
+    st.subheader("出生地点精确选择")
+    
+    # Level 1: 省/直辖市
+    province_list = list(CHINA_LOCATIONS.keys())
+    selected_province = st.selectbox("选择省份/直辖市", province_list)
+    
+    # Level 2: 市 (这里为了简化，直辖市的下一级直接是区，逻辑可根据实际json调整)
+    # 假设直辖市逻辑: 省=市
+    selected_city = selected_province 
+    
+    # Level 3: 区/县
+    district_data = CHINA_LOCATIONS[selected_province]["children"]
+    district_list = list(district_data.keys())
+    selected_district = st.selectbox("选择区/县", district_list)
+    
+    # Level 4: 医院/具体地点
+    hospital_list = district_data[selected_district].get("hospitals", []) + ["其他地点"]
+    selected_hospital = st.selectbox("选择出生医院/地点", hospital_list)
+    
+    # 计算经纬度
+    lon, lat = calculate_lat_lon(selected_province, selected_city, selected_district, selected_hospital)
+    
+    st.info(f"📍 自动计算坐标：\n经度 {lon:.4f} E\n纬度 {lat:.4f} N")
+    
+    if st.button("开始排盘分析", type="primary"):
+        st.session_state['analyzed'] = True
     else:
-        # 初始欢迎页 (白色简约版)
-        st.markdown("""
-        <div style='text-align: center; margin-top: 80px; color: #555;'>
-            <h1>🏮 人生 K 线系统</h1>
-            <p style='font-size: 1.1em;'>传统的八字命理 · 现代的可视化呈现</p>
-            <br>
-            <div style='background-color: #ffffff; padding: 20px; border-radius: 10px; border: 1px solid #eee; display: inline-block; text-align: left;'>
-                <p>👉 <strong>输入地址</strong>：自动定位经纬度，排盘更精准</p>
-                <p>👉 <strong>每日运势</strong>：查看今日宜忌、财神方位</p>
-                <p>👉 <strong>百年推演</strong>：红涨绿跌，一目了然</p>
-            </div>
-            <p style='margin-top: 30px; font-size: 12px; color: #999;'>请在左侧输入信息开始排盘</p>
-        </div>
-        """, unsafe_allow_html=True)
+        st.session_state['analyzed'] = False
 
-if __name__ == "__main__":
-    main()
+# === 主界面内容 ===
+
+if st.session_state.get('analyzed'):
+    # 基础信息展示
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("出生地点", f"{selected_province} {selected_district}")
+    with col2:
+        st.metric("出生坐标", f"E:{lon:.2f}, N:{lat:.2f}")
+    with col3:
+        st.metric("生辰", f"{birth_date} {birth_time}")
+
+    st.markdown("---")
+
+    # --- 模块：年度运势 K线图 ---
+    st.header("📈 2025年流年运势 K线图")
+    st.caption("注：K线代表每日运势能量波动。红色代表运势上升（阳线），绿色代表运势下行（阴线）。")
+
+    # 生成数据
+    df_fortune = generate_daily_fortune(birth_date, 2025)
+    
+    # 绘制 K线图
+    fig = go.Figure(data=[go.Candlestick(
+        x=df_fortune['日期'],
+        open=df_fortune['开盘'],
+        high=df_fortune['最高'],
+        low=df_fortune['最低'],
+        close=df_fortune['收盘'],
+        increasing_line_color='red', 
+        decreasing_line_color='green',
+        name="运势能量"
+    )])
+
+    fig.update_layout(
+        title='2025年 全年运势波动图',
+        yaxis_title='运势能量值 (0-100)',
+        xaxis_title='日期',
+        template="plotly_white",
+        height=500,
+        hovermode="x unified" # 鼠标悬停显示详细信息
+    )
+    
+    # 添加中文解释注解
+    fig.add_hline(y=80, line_dash="dash", line_color="red", annotation_text="大吉区", annotation_position="top left")
+    fig.add_hline(y=40, line_dash="dash", line_color="gray", annotation_text="低谷区", annotation_position="bottom left")
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    # --- 模块：具体查看每一天的运势 ---
+    st.markdown("---")
+    st.header("📅 每日运势详情查询")
+    
+    c1, c2 = st.columns([1, 3])
+    with c1:
+        # 选择具体日期
+        check_date = st.date_input(
+            "选择你想查询的日期", 
+            value=datetime.date(2025, 1, 1),
+            min_value=datetime.date(2025, 1, 1),
+            max_value=datetime.date(2025, 12, 31)
+        )
+    
+    with c2:
+        # 获取该日数据
+        day_data = df_fortune[df_fortune['日期'] == check_date].iloc[0]
+        
+        score = day_data['收盘']
+        desc = day_data['运势描述']
+        
+        # 动态展示样式
+        if score > 80:
+            st.success(f"🌟 **{check_date} 运势：{desc} (分数: {score})**")
+            st.markdown("今日能量充沛，适合做重要决策，诸事皆宜。")
+        elif score > 60:
+            st.info(f"🍃 **{check_date} 运势：{desc} (分数: {score})**")
+            st.markdown("今日运势平稳，按部就班即可，无大碍。")
+        else:
+            st.warning(f"⚠️ **{check_date} 运势：{desc} (分数: {score})**")
+            st.markdown("今日能量较低，宜静不宜动，注意言行，避免冲突。")
+            
+        # 模拟展示宜忌 (这里随机生成，实际需结合老黄历算法)
+        st.write("**今日宜：** 读书、纳财、修造")
+        st.write("**今日忌：** 远行、诉讼、动土")
+
+else:
+    st.info("👈 请在左侧填写完整信息并点击【开始排盘分析】")
