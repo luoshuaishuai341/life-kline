@@ -47,7 +47,7 @@ def load_admin_data():
                 try:
                     with open(p, "r", encoding="utf-8") as f:
                         data = json.load(f)
-                    if isinstance(data, list) and len(data) > 30:  # 粗略判断有效
+                    if isinstance(data, list) and len(data) > 30:
                         return data, filename
                 except Exception as e:
                     st.warning(f"读取 {filename} 失败: {e}")
@@ -63,7 +63,6 @@ ADMIN_DATA, LOADED_FILENAME = load_admin_data()
 def get_precise_location(address_str: str):
     geolocator = Nominatim(user_agent="bazi_pro_max_v2025")
     try:
-        # 港澳台不加 "China"，大陆地址加 "中国" 提升识别率
         if any(k in address_str for k in ["香港", "澳门", "台湾"]):
             query = address_str
         else:
@@ -79,7 +78,7 @@ def get_precise_location(address_str: str):
         return {"success": False, "msg": f"定位异常: {str(e)}"}
 
 # ==========================================
-# 4. 核心命理引擎（支持精确到秒）
+# 4. 核心命理引擎（支持精确到秒 + 修复八字方法调用）
 # ==========================================
 class DestinyEngine:
     def __init__(self, birth_date: date, hour: int, minute: int, second: int, lat: float, lng: float):
@@ -106,8 +105,14 @@ class DestinyEngine:
 
         time_diff = (self.lng - 120.0) * 4  # 东八区基准
 
+        # 正确获取八字四柱（兼容 lunar_python 所有版本）
+        year_pillar = self.bazi.getYear()        # 如：甲辰
+        month_pillar = self.bazi.getMonth()      # 如：癸未
+        day_pillar = self.bazi.getDay()          # 如：丁酉
+        time_pillar = self.bazi.getTime()        # 如：壬辰
+
         return {
-            "bazi": f"{self.bazi.getYearGanZhi()}　{self.bazi.getMonthGanZhi()}　{self.bazi.getDayGanZhi()}　{self.bazi.getTimeGanZhi()}",
+            "bazi": f"{year_pillar}　{month_pillar}　{day_pillar}　{time_pillar}",
             "day_master": self.bazi.getDayGan() + "（" + self.bazi.getDayWuXing() + "）",
             "shengxiao": self.lunar.getYearShengXiaoInChinese(),
             "nongli": f"{self.lunar.getYearInChinese()}年　{self.lunar.getMonthInChinese()}月{self.lunar.getDayInChinese()}",
@@ -117,7 +122,7 @@ class DestinyEngine:
         }
 
     def _calc_wuxing(self):
-        """基于真实八字统计五行强度（非随机）"""
+        """基于真实八字统计五行强度"""
         strength = {"金": 0, "木": 0, "水": 0, "火": 0, "土": 0}
         # 天干权重2
         for gan in [self.bazi.getYearGan(), self.bazi.getMonthGan(), self.bazi.getDayGan(), self.bazi.getTimeGan()]:
