@@ -13,10 +13,10 @@ from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut, GeocoderUnavailable
 
 # ==========================================
-# 1. 页面配置与炫酷样式（全中文）
+# 1. 页面配置与全中文炫酷样式
 # ==========================================
 st.set_page_config(
-    page_title="天机 · 全息命理终端 V18 终极版",
+    page_title="天机 · 全息命理终端 V19 终极版",
     page_icon="🌌",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -24,43 +24,22 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-    .stApp { 
-        background: linear-gradient(to bottom, #e0e7ff, #f7f9fc); 
-        color: #333; 
-    }
-    h1, h2, h3 { 
-        font-family: 'KaiTi', 'PingFang SC', sans-serif; 
-        color: #4a148c !important; 
-        text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
-    }
-    
-    .metric-box {
-        background: linear-gradient(135deg, #ffffff, #f0f4ff); 
-        padding: 20px; border-radius: 12px;
-        border-left: 6px solid #9c27b0; box-shadow: 0 4px 12px rgba(156,39,176,0.15);
-        margin-bottom: 15px; text-align: center;
-    }
+    .stApp { background: linear-gradient(to bottom, #e0e7ff, #f7f9fc); color: #333; }
+    h1, h2, h3 { font-family: 'KaiTi', 'PingFang SC', sans-serif; color: #4a148c !important; text-shadow: 1px 1px 2px rgba(0,0,0,0.1); }
+    .metric-box { background: linear-gradient(135deg, #ffffff, #f0f4ff); padding: 20px; border-radius: 12px;
+        border-left: 6px solid #9c27b0; box-shadow: 0 4px 12px rgba(156,39,176,0.15); margin-bottom: 15px; text-align: center; }
     .metric-title { font-size: 16px; color: #7e57c2; font-weight: bold; }
     .metric-value { font-size: 28px; font-weight: bold; color: #4a148c; margin: 10px 0; }
-    
-    .shensha-tag {
-        display: inline-block; padding: 8px 16px; margin: 6px;
-        border-radius: 30px; font-size: 14px; font-weight: bold; 
-        color: white; box-shadow: 0 2px 6px rgba(0,0,0,0.2);
-        animation: glow 2s infinite alternate;
-    }
+    .shensha-tag { display: inline-block; padding: 8px 16px; margin: 6px; border-radius: 30px; font-size: 14px; font-weight: bold; 
+        color: white; box-shadow: 0 2px 6px rgba(0,0,0,0.2); animation: glow 2s infinite alternate; }
     @keyframes glow { from { box-shadow: 0 0 5px; } to { box-shadow: 0 0 15px; } }
     .tag-pink { background: linear-gradient(#e91e63, #c2185b); }
     .tag-gold { background: linear-gradient(#fbc02d, #f9a825); color: #333; }
     .tag-blue { background: linear-gradient(#2196f3, #1976d2); }
     .tag-purple { background: linear-gradient(#9c27b0, #7b1fa2); }
     .tag-gray { background: #9e9e9e; }
-
-    .stButton>button { 
-        background: linear-gradient(#ab47bc, #7b1fa2); 
-        color: white; border-radius: 30px; 
-        box-shadow: 0 4px 15px rgba(171,71,188,0.4);
-    }
+    .stButton>button { background: linear-gradient(#ab47bc, #7b1fa2); color: white; border-radius: 30px; 
+        box-shadow: 0 4px 15px rgba(171,71,188,0.4); }
     .stButton>button:hover { transform: translateY(-3px); box-shadow: 0 8px 25px rgba(171,71,188,0.6); }
 </style>
 """, unsafe_allow_html=True)
@@ -88,7 +67,7 @@ ADMIN_DATA = load_admin_data()
 # ==========================================
 @st.cache_data(show_spinner=False)
 def get_precise_location(addr):
-    ua = f"bazi_v18_{random.randint(10000,99999)}"
+    ua = f"bazi_v19_{random.randint(10000,99999)}"
     try:
         query = addr if any(k in addr for k in ["香港","澳门","台湾"]) else f"中国 {addr}"
         loc = Nominatim(user_agent=ua).geocode(query, timeout=10)
@@ -118,7 +97,7 @@ def call_ai_analysis(api_key, base_url, context):
         return f"⚠️ 网络异常: {str(e)}"
 
 # ==========================================
-# 4. 核心引擎（真正基于生辰八字 + 河图洛书数理的K线）
+# 4. 核心引擎（兼容所有 lunar_python 版本 + 河图洛书真实推演）
 # ==========================================
 class DestinyEngine:
     def __init__(self, b_date: date, hour: int, minute: int, lat: float, lng: float, gender: str):
@@ -131,26 +110,27 @@ class DestinyEngine:
         self.lunar = self.solar.getLunar()
         self.bazi = self.lunar.getEightChar()
         
-        # 种子完全基于八字（每人绝对不同）
-        self.seed = hash((
-            self.bazi.getYearGanZhi(), self.bazi.getMonthGanZhi(),
-            self.bazi.getDayGanZhi(), self.bazi.getTimeGanZhi(),
-            hour, minute, lat, lng
-        ))
+        # 兼容所有版本的八字柱获取（使用 getYear() 等安全方法）
+        self.year_pillar = self.bazi.getYear()
+        self.month_pillar = self.bazi.getMonth()
+        self.day_pillar = self.bazi.getDay()
+        self.time_pillar = self.bazi.getTime()
+        
+        # 种子基于真实八字柱字符串，确保每人不同
+        self.seed = hash((self.year_pillar, self.month_pillar, self.day_pillar, self.time_pillar, hour, minute, lat, lng))
         random.seed(self.seed)
         np.random.seed(self.seed % (2**32))
         
         self.true_solar_diff = (lng - 120.0) * 4
-        self.day_gan_num = self._gan_to_num(self.bazi.getDayGan())
+        self.day_gan_num = self._gan_to_hetu(self.bazi.getDayGan())
         self.day_zhi_num = self._zhi_to_num(self.bazi.getDayZhi())
         self.wuxing_strength = self._calc_wuxing()
         self.favored = self._get_favored()
         self.shen_sha = self._calc_shen_sha()
         self.pattern = self._get_pattern()
 
-    # 天干地支转河图数（核心数理）
-    def _gan_to_num(self, gan):
-        map_gan = {"甲":6,"乙":1,"丙":9,"丁":4,"戊":5,"己":10,"庚":2,"辛":7,"壬":3,"癸":8}
+    def _gan_to_hetu(self, gan):
+        map_gan = {"甲":6, "乙":1, "丙":9, "丁":4, "戊":5, "己":10, "庚":2, "辛":7, "壬":3, "癸":8}
         return map_gan.get(gan, 5)
 
     def _zhi_to_num(self, zhi):
@@ -169,6 +149,8 @@ class DestinyEngine:
 
     def _get_favored(self):
         day_wx = self.bazi.getDayWuXing()
+        if day_wx not in self.wuxing_strength:
+            day_wx = "土"
         weak = min(self.wuxing_strength, key=self.wuxing_strength.get)
         return weak
 
@@ -193,12 +175,10 @@ class DestinyEngine:
         if not res: res.append({"name": "命格平稳", "type": "gray", "desc": "安稳厚重，自力更生"})
         return res
 
-    # 每年大运五行（基于日干河图数推演）
     def _get_year_yun(self, age):
-        # 河图循环：1-6水木、2-7金火、3-8水土、4-9木金、5-10土中
         base = (self.day_gan_num + age) % 10
         if base == 0: base = 10
-        yun_map = {1:"水运",2:"金运",3:"水运",4:"木运",5:"土运",6:"木运",7:"火运",8:"土运",9:"金运",10:"土运"}
+        yun_map = {1:"水运", 2:"金运", 3:"水运", 4:"木运", 5:"土运", 6:"木运", 7:"火运", 8:"土运", 9:"金运", 10:"土运"}
         return yun_map.get(base, "土运")
 
     def generate_life_kline(self):
@@ -207,35 +187,26 @@ class DestinyEngine:
         lows = []
         
         for age in range(0, 101):
-            yun = self._get_year_yun(age)  # 每年真实大运五行
+            yun = self._get_year_yun(age)
             
-            # 河图生克决定基础趋势
             base_score = 0
-            if "木" in yun and self.favored == "木": base_score += 8
-            if "火" in yun and self.favored == "火": base_score += 8
-            if "土" in yun and self.favored == "土": base_score += 8
-            if "金" in yun and self.favored == "金": base_score += 8
-            if "水" in yun and self.favored == "水": base_score += 8
+            if yun[:-1] == self.favored: base_score += 10
             
-            # 神煞加持
             bonus = len(self.shen_sha) * 3
-            
-            # 河图数波动
-            hetu_wave = np.sin(age / 9 * np.pi) * 6  # 九年一轮回
-            noise = np.random.normal(0, 4)
+            hetu_wave = np.sin(age / 9 * np.pi) * 8
+            noise = np.random.normal(0, 5)
             change = base_score / 2 + bonus / 4 + hetu_wave + noise
             
-            # 本命年重击（地支循环）
-            if age % 12 == 0 and age > 0: change -= 15
+            if age % 12 == 0 and age > 0: change -= 16
             
             close = max(10, price + change)
-            if change < -10: lows.append(age)
+            if change < -12: lows.append(age)
             
-            status = "大吉大利" if change > 12 else ("亨通顺利" if change > 5 else ("低谷考验" if change < -10 else "平稳有序"))
+            status = "大吉大利" if change > 14 else ("亨通顺利" if change > 6 else ("低谷考验" if change < -12 else "平稳有序"))
             
             data.append({
                 "年龄": age, "年份": self.birth_date.year + age, "开盘": price, "收盘": close,
-                "最高": close + abs(change)*1.4, "最低": price - abs(change)*1.4,
+                "最高": close + abs(change)*1.5, "最低": price - abs(change)*1.5,
                 "状态": status, "当年大运": yun
             })
             price = close
@@ -261,9 +232,9 @@ class DestinyEngine:
         return pd.DataFrame(data)
 
     def get_ai_context(self):
-        bazi_str = f"{self.bazi.getYear()}　{self.bazi.getMonth()}　{self.bazi.getDay()}　{self.bazi.getTime()}"
+        bazi_str = f"{self.year_pillar}　{self.month_pillar}　{self.day_pillar}　{self.time_pillar}"
         shensha_names = [s['name'] for s in self.shen_sha]
-        return f"性别:{self.gender}，出生:{self.birth_date} {self.hour}:{self.minute:02}，八字:{bazi_str}，日干河图数:{self.day_gan_num}，日支数:{self.day_zhi_num}，喜用神:{self.favored}，格局:{self.pattern[0]}，神煞:{shensha_names}"
+        return f"性别:{self.gender}，出生:{self.birth_date} {self.hour}:{self.minute:02}，八字:{bazi_str}，日干河图数:{self.day_gan_num}，喜用神:{self.favored}，格局:{self.pattern[0]}，神煞:{shensha_names}"
 
 # ==========================================
 # 5. 主程序
@@ -319,7 +290,7 @@ def main():
     st.markdown(f"<h1 style='text-align:center;'>🌌 {name} · 全息命盘</h1>", unsafe_allow_html=True)
 
     col1, col2, col3, col4, col5 = st.columns(5)
-    bazi_str = f"{engine.bazi.getYear()}　{engine.bazi.getMonth()}　{engine.bazi.getDay()}　{engine.bazi.getTime()}"
+    bazi_str = f"{engine.year_pillar}　{engine.month_pillar}　{engine.day_pillar}　{engine.time_pillar}"
     col1.markdown(f"<div class='metric-box'><div class='metric-title'>八字</div><div class='metric-value'>{bazi_str}</div></div>", unsafe_allow_html=True)
     col2.markdown(f"<div class='metric-box'><div class='metric-title'>格局</div><div class='metric-value'>{engine.pattern[0]}</div></div>", unsafe_allow_html=True)
     col3.markdown(f"<div class='metric-box'><div class='metric-title'>喜用神</div><div class='metric-value'>{engine.favored}</div></div>", unsafe_allow_html=True)
@@ -329,24 +300,24 @@ def main():
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["📈 百年人生K线", "📅 流年日运", "🌟 神煞星耀", "🔥 运势热力图", "🔮 AI 大师解盘"])
 
     with tab1:
-        st.markdown("### 📈 百年人生运势 · 专属K线（基于河图洛书与八字）")
+        st.markdown("### 📈 百年人生运势 · 专属K线（河图洛书 + 八字真实推演）")
         fig = go.Figure()
         fig.add_trace(go.Candlestick(
             x=df_life['年龄'], open=df_life['开盘'], high=df_life['最高'],
             low=df_life['最低'], close=df_life['收盘'],
             increasing_line_color='#ff4081', decreasing_line_color='#40c4ff',
-            name='人生运势', text=df_life['当年大运'] + " " + df_life['状态'],
+            name='人生运势', text=df_life['当年大运'] + " · " + df_life['状态'],
             hovertemplate="<b>%{x}岁（%{text}）</b><br>开盘: %{open:.1f}<br>收盘: %{close:.1f}<extra></extra>"
         ))
         fig.add_trace(go.Scatter(x=df_life['年龄'], y=df_life['十年均线'], line=dict(color='#ffab40', width=3, dash='dot'), name='十年大运'))
         fig.add_trace(go.Scatter(x=df_life['年龄'], y=df_life['三十年趋势'], line=dict(color='#7c4dff', width=3), name='一生趋势'))
-        fig.update_layout(height=600, template="plotly_dark", title="你的人生运势曲线（河图洛书推演）",
+        fig.update_layout(height=600, template="plotly_dark", title="你的人生运势曲线（独一无二）",
                           xaxis_title="年龄", yaxis_title="运势能量")
         if engine.low_ages:
             st.warning(f"⚠️ 低谷年龄：{engine.low_ages}")
         st.plotly_chart(fig, use_container_width=True)
 
-        st.markdown("#### 每年大运一览（部分示例）")
+        st.markdown("#### 每年大运示例")
         sample = df_life.iloc[::10][['年龄', '年份', '当年大运', '状态']]
         st.dataframe(sample, use_container_width=True)
 
